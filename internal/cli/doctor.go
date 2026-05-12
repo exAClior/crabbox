@@ -10,7 +10,7 @@ import (
 
 func (a App) doctor(ctx context.Context, args []string) error {
 	fs := newFlagSet("doctor", a.Stderr)
-	provider := fs.String("provider", defaultConfig().Provider, "provider: hetzner, aws, azure, gcp, proxmox, or ssh")
+	provider := fs.String("provider", defaultConfig().Provider, "provider: hetzner, aws, azure, gcp, tencent, proxmox, or ssh")
 	id := fs.String("id", "", "remote lease id to inspect")
 	targetFlags := registerTargetFlags(fs, defaultConfig())
 	if err := parseFlags(fs, args); err != nil {
@@ -41,6 +41,7 @@ func (a App) doctor(ctx context.Context, args []string) error {
 		}
 	}
 	cfg.Provider = *provider
+	canonicalizeConfigProvider(&cfg)
 	if err := applyTargetFlagOverrides(&cfg, fs, targetFlags); err != nil {
 		return err
 	}
@@ -114,7 +115,14 @@ func (a App) doctor(ctx context.Context, args []string) error {
 		}
 	}
 
-	if os.Getenv("CRABBOX_SSH_KEY") != "" {
+	if cfg.Provider == "tencent" {
+		if err := validateTencentHAISSHConfig(cfg); err != nil {
+			fmt.Fprintf(a.Stdout, "failed  ssh-key  %v\n", err)
+			ok = false
+		} else {
+			fmt.Fprintf(a.Stdout, "ok      ssh-key  baked-image user=%s key=%s\n", cfg.SSHUser, cfg.SSHKey)
+		}
+	} else if os.Getenv("CRABBOX_SSH_KEY") != "" {
 		if _, err := os.Stat(cfg.SSHKey); err != nil {
 			fmt.Fprintf(a.Stdout, "missing ssh key %s\n", cfg.SSHKey)
 			ok = false
@@ -170,6 +178,20 @@ func (a App) doctor(ctx context.Context, args []string) error {
 			ok = false
 		} else {
 			fmt.Fprintf(a.Stdout, "ok      azure    crabbox_servers=%d location=%s default_type=%s\n", len(servers), cfg.AzureLocation, cfg.ServerType)
+		}
+	case "tencent":
+		client, err := newTencentClient(cfg)
+		if err != nil {
+			fmt.Fprintf(a.Stdout, "failed  tencent  %v\n", err)
+			ok = false
+			break
+		}
+		servers, err := client.ListCrabboxServers(ctx)
+		if err != nil {
+			fmt.Fprintf(a.Stdout, "failed  tencent  %v\n", err)
+			ok = false
+		} else {
+			fmt.Fprintf(a.Stdout, "ok      tencent  crabbox_servers=%d region=%s application_id=%s default_bundle=%s\n", len(servers), cfg.TencentRegion, cfg.TencentApplicationID, cfg.ServerType)
 		}
 	default:
 		client, err := newHetznerClient()

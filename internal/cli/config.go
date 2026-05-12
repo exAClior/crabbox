@@ -367,7 +367,7 @@ func baseConfig() Config {
 		GCPNetwork:           "default",
 		GCPTags:              []string{"crabbox-ssh"},
 		GCPRootGB:            400,
-		TencentRegion:        "ap-singapore",
+		TencentRegion:        tencentHAIDefaultRegion,
 		TencentApplicationID: tencentHAIDefaultAppID,
 		TencentSystemDiskGB:  tencentHAIDefaultDiskGB,
 		SSHUser:              "crabbox",
@@ -1654,7 +1654,9 @@ func applyEnv(cfg *Config) {
 		cfg.Proxmox.InsecureTLS = value
 	}
 	cfg.SSHUser = getenv("CRABBOX_SSH_USER", cfg.SSHUser)
-	cfg.SSHKey = getenv("CRABBOX_SSH_KEY", cfg.SSHKey)
+	if sshKey := getenv("CRABBOX_SSH_KEY", ""); sshKey != "" {
+		cfg.SSHKey = expandUserPath(sshKey)
+	}
 	cfg.SSHPort = getenv("CRABBOX_SSH_PORT", cfg.SSHPort)
 	if ports, ok := getenvList("CRABBOX_SSH_FALLBACK_PORTS"); ok {
 		cfg.SSHFallbackPorts = ports

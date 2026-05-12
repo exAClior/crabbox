@@ -22,6 +22,7 @@ func TestCoordinatorProviderReadinessSupported(t *testing.T) {
 		{provider: "gcp", want: true},
 		{provider: "hetzner", want: true},
 		{provider: "proxmox", want: false},
+		{provider: "tencent", want: false},
 		{provider: "daytona", want: false},
 		{provider: "islo", want: false},
 		{provider: "e2b", want: false},

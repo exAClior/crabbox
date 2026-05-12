@@ -45,6 +45,7 @@ e2b        E2B sandboxes with delegated command execution
 - [Azure](../providers/azure.md): Azure Linux/native Windows, shared infra, capacity, and cleanup.
 - [Google Cloud](../providers/gcp.md): GCP Compute Engine Linux SSH leases.
 - [Hetzner](../providers/hetzner.md): Linux-only managed provider behavior, classes, and cleanup.
+- [Tencent Cloud HAI](../providers/tencent.md): direct HAI Linux leases from region-scoped application images.
 - [Proxmox](../providers/proxmox.md): direct Proxmox VE Linux QEMU VM clones.
 - [Static SSH](../providers/ssh.md): existing Linux, macOS, and Windows SSH hosts.
 - [Blacksmith Testbox](../providers/blacksmith-testbox.md): delegated Testbox backend behavior.
@@ -165,6 +166,12 @@ has no Durable Object alarm; cleanup is best-effort through provider labels and
 manual `crabbox cleanup`. Direct AWS fallback can retry provider types, but the
 structured quota preflight and `provisioningAttempts` metadata belong to the
 brokered Worker path.
+
+Use `--provider tencent` with `CRABBOX_TENCENT_*` config for direct Tencent HAI
+smoke. HAI application images are region-scoped; the current custom image path
+uses Singapore (`ap-singapore`). HAI does not inject SSH keys or passwords, so
+set `CRABBOX_SSH_USER` and `CRABBOX_SSH_KEY` to match the public key already
+baked into the application image. See [Tencent Cloud HAI](../providers/tencent.md).
 
 Use `--provider proxmox` with `CRABBOX_PROXMOX_*` config for direct Proxmox
 smoke. Proxmox clones a configured Linux QEMU template, injects SSH via

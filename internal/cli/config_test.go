@@ -25,6 +25,15 @@ func clearConfigEnv(t *testing.T) {
 		"CRABBOX_ACCESS_CLIENT_ID",
 		"CRABBOX_ACCESS_CLIENT_SECRET",
 		"CRABBOX_ACCESS_TOKEN",
+		"CRABBOX_SSH_USER",
+		"CRABBOX_SSH_KEY",
+		"CRABBOX_SSH_PORT",
+		"CRABBOX_TENCENT_SECRET_ID",
+		"CRABBOX_TENCENT_SECRET_KEY",
+		"CRABBOX_TENCENT_REGION",
+		"CRABBOX_TENCENT_APPLICATION_ID",
+		"CRABBOX_TENCENT_BUNDLE_TYPE",
+		"CRABBOX_TENCENT_SYSTEM_DISK_GB",
 		"CF_ACCESS_CLIENT_ID",
 		"CF_ACCESS_CLIENT_SECRET",
 		"CF_ACCESS_TOKEN",
@@ -101,6 +110,39 @@ func clearConfigEnv(t *testing.T) {
 		"CRABBOX_NAMESPACE_DELETE_ON_RELEASE",
 	} {
 		t.Setenv(key, "")
+	}
+}
+
+func TestSSHKeyEnvExpandsHome(t *testing.T) {
+	clearConfigEnv(t)
+	home := t.TempDir()
+	repo := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("CRABBOX_CONFIG", "")
+	t.Setenv("CRABBOX_PROVIDER", "")
+	t.Setenv("CRABBOX_DEFAULT_CLASS", "")
+	t.Setenv("CRABBOX_SSH_KEY", "~/.ssh/crabbox-hai")
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".ssh", "crabbox-hai")
+	if cfg.SSHKey != want {
+		t.Fatalf("SSHKey=%q want %q", cfg.SSHKey, want)
 	}
 }
 

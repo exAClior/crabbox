@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -21,7 +22,8 @@ const (
 	tencentHAIHost              = "hai.tencentcloudapi.com"
 	tencentHAIService           = "hai"
 	tencentHAIVersion           = "2023-08-12"
-	tencentHAIDefaultAppID      = "app-1tjmypf1"
+	tencentHAIDefaultRegion     = "ap-singapore"
+	tencentHAIDefaultAppID      = "app-khcjsi2t"
 	tencentHAIDefaultDiskGB     = int64(80)
 	tencentHAIDefaultDiskType   = "CLOUD_PREMIUM"
 	tencentHAIInstanceNamePrefx = "crabbox-"
@@ -106,6 +108,9 @@ func (b *tencentBackend) Spec() ProviderSpec { return b.spec }
 
 func (b *tencentBackend) Acquire(ctx context.Context, req AcquireRequest) (LeaseTarget, error) {
 	cfg := b.cfg
+	if err := validateTencentHAISSHConfig(cfg); err != nil {
+		return LeaseTarget{}, err
+	}
 	client, err := newTencentClient(cfg)
 	if err != nil {
 		return LeaseTarget{}, err
@@ -117,7 +122,7 @@ func (b *tencentBackend) Acquire(ctx context.Context, req AcquireRequest) (Lease
 	}
 	slug := allocateDirectLeaseSlug(leaseID, servers)
 	cfg.ProviderKey = ""
-	fmt.Fprintf(b.rt.Stderr, "provisioning provider=tencent-hai lease=%s slug=%s class=%s bundle=%s region=%s application=%s keep=%v\n", leaseID, slug, cfg.Class, cfg.ServerType, cfg.TencentRegion, cfg.TencentApplicationID, req.Keep)
+	fmt.Fprintf(b.rt.Stderr, "provisioning provider=tencent-hai lease=%s slug=%s class=%s bundle=%s region=%s application=%s auth=baked-image ssh_user=%s ssh_key=%s keep=%v\n", leaseID, slug, cfg.Class, cfg.ServerType, cfg.TencentRegion, cfg.TencentApplicationID, cfg.SSHUser, cfg.SSHKey, req.Keep)
 	server, cfg, err := client.CreateServerWithFallback(ctx, cfg, leaseID, slug, req.Keep, func(format string, args ...any) {
 		fmt.Fprintf(b.rt.Stderr, format, args...)
 	})
@@ -134,7 +139,7 @@ func (b *tencentBackend) Acquire(ctx context.Context, req AcquireRequest) (Lease
 		if !req.Keep {
 			_ = client.DeleteServer(context.Background(), server.CloudID)
 		}
-		return LeaseTarget{}, fmt.Errorf("HAI instance was created, but SSH bootstrap did not complete; HAI does not expose CVM cloud-init or SSH key injection for Crabbox: %w", err)
+		return LeaseTarget{}, fmt.Errorf("HAI instance was created, but SSH never became usable. HAI does not expose CVM cloud-init or SSH key injection; the application image in region %s must already contain the public key for user %s and the local private key must be %s: %w", cfg.TencentRegion, target.User, target.Key, err)
 	}
 	server.Labels["state"] = "ready"
 	return LeaseTarget{Server: server, SSH: target, LeaseID: leaseID}, nil
@@ -160,8 +165,10 @@ func (b *tencentBackend) Resolve(ctx context.Context, req ResolveRequest) (Lease
 		}
 		if server, leaseID, err = findServerByAlias(servers, req.ID); err != nil {
 			return LeaseTarget{}, err
-		} else if leaseID == "" {
+		} else if server.CloudID == "" {
 			return LeaseTarget{}, exit(4, "lease/server not found: %s", req.ID)
+		} else if leaseID == "" {
+			leaseID = server.CloudID
 		}
 	}
 	target := sshTargetFromConfig(b.cfg, server.PublicNet.IPv4.IP)
@@ -212,18 +219,18 @@ type TencentClient struct {
 func newTencentClient(cfg Config) (*TencentClient, error) {
 	secretID := strings.TrimSpace(cfg.TencentSecretID)
 	if secretID == "" {
-		secretID = getenv("TENCENT_SECRET_ID", getenv("TENCENTCLOUD_SECRET_ID", ""))
+		secretID = getenv("CRABBOX_TENCENT_SECRET_ID", getenv("TENCENT_SECRET_ID", getenv("TENCENTCLOUD_SECRET_ID", "")))
 	}
 	secretKey := strings.TrimSpace(cfg.TencentSecretKey)
 	if secretKey == "" {
-		secretKey = getenv("TENCENT_SECRET_KEY", getenv("TENCENTCLOUD_SECRET_KEY", ""))
+		secretKey = getenv("CRABBOX_TENCENT_SECRET_KEY", getenv("TENCENT_SECRET_KEY", getenv("TENCENTCLOUD_SECRET_KEY", "")))
 	}
 	region := strings.TrimSpace(cfg.TencentRegion)
 	if region == "" {
 		region = getenv("CRABBOX_TENCENT_REGION", "")
 	}
 	if secretID == "" || secretKey == "" {
-		return nil, exit(3, "TENCENT_SECRET_ID and TENCENT_SECRET_KEY are required")
+		return nil, exit(3, "CRABBOX_TENCENT_SECRET_ID/CRABBOX_TENCENT_SECRET_KEY or TENCENT_SECRET_ID/TENCENT_SECRET_KEY are required")
 	}
 	if region == "" {
 		return nil, exit(3, "tencent.region or CRABBOX_TENCENT_REGION is required")
@@ -344,7 +351,29 @@ func (c *TencentClient) SetLabels(ctx context.Context, id string, labels map[str
 }
 func (c *TencentClient) DeleteSSHKey(ctx context.Context, name string) error { return nil }
 
-func (c *TencentClient) HourlyPriceUSD(ctx context.Context, bundleType string) (float64, error) {
+func validateTencentHAISSHConfig(cfg Config) error {
+	user := strings.TrimSpace(cfg.SSHUser)
+	if user == "" {
+		return exit(3, "Tencent HAI requires ssh.user or CRABBOX_SSH_USER matching the custom application image user")
+	}
+	key := strings.TrimSpace(cfg.SSHKey)
+	if key == "" {
+		return exit(3, "Tencent HAI requires ssh.key or CRABBOX_SSH_KEY pointing to the private key for the public key baked into the custom application image")
+	}
+	if strings.HasSuffix(key, ".pub") {
+		return exit(3, "Tencent HAI CRABBOX_SSH_KEY must point to the private key, not the public key %s", key)
+	}
+	info, err := os.Stat(key)
+	if err != nil {
+		return exit(3, "Tencent HAI SSH key %s is not readable; set CRABBOX_SSH_KEY to the private key matching the custom application image: %v", key, err)
+	}
+	if info.IsDir() {
+		return exit(3, "Tencent HAI SSH key %s is a directory; set CRABBOX_SSH_KEY to a private key file", key)
+	}
+	return nil
+}
+
+func (c *TencentClient) HourlyPriceCNY(ctx context.Context, bundleType string) (float64, error) {
 	diskGB := c.cfg.TencentSystemDiskGB
 	if diskGB <= 0 {
 		diskGB = tencentHAIDefaultDiskGB
@@ -361,20 +390,21 @@ func (c *TencentClient) HourlyPriceUSD(ctx context.Context, bundleType string) (
 		InstanceCount: 1,
 	}, &resp)
 	if err != nil {
-		fallback := tencentStaticHourlyPriceUSD(bundleType)
+		fallback := tencentStaticHourlyPriceCNY(bundleType)
 		if fallback > 0 {
 			return fallback, nil
 		}
 		return 0, err
 	}
-	price := resp.Response.Price.InstancePrice.UnitPriceDiscount
-	if price <= 0 {
-		price = resp.Response.Price.InstancePrice.UnitPrice
-	}
+	price := resp.Response.Price.hourlyUnitPriceCNY()
 	if price > 0 {
 		return price, nil
 	}
-	return tencentStaticHourlyPriceUSD(bundleType), nil
+	fallback := tencentStaticHourlyPriceCNY(bundleType)
+	if fallback > 0 {
+		return fallback, nil
+	}
+	return 0, fmt.Errorf("tencent HAI price response did not include hourly price for bundle %s", bundleType)
 }
 
 func (c *TencentClient) waitForServerIP(ctx context.Context, id string) (Server, error) {
@@ -541,16 +571,16 @@ func isLocalNotFoundExit(err error) bool {
 	return AsExitError(err, &exitErr) && exitErr.Code == 4
 }
 
-func tencentStaticHourlyPriceUSD(bundleType string) float64 {
+// tencentStaticHourlyPriceCNY returns public "starting from" pay-as-you-go
+// HAI prices in RMB/CNY per hour. Exact billing still comes from
+// InquirePriceRunInstances because region, application, discounts, and disk
+// choices can change the result. 4XL has no public static price, so don't guess.
+func tencentStaticHourlyPriceCNY(bundleType string) float64 {
 	switch bundleType {
 	case "XL":
-		return 1.00
-	case "24GB_A":
-		return 1.50
-	case "3XL":
-		return 3.00
-	case "4XL":
-		return 6.00
+		return 1.20
+	case "24GB_A", "3XL":
+		return 3.60
 	default:
 		return 0
 	}
@@ -619,14 +649,34 @@ type haiInstance struct {
 
 type haiInquirePriceRunInstancesResponse struct {
 	Response struct {
-		Price struct {
-			InstancePrice struct {
-				UnitPrice         float64 `json:"UnitPrice"`
-				UnitPriceDiscount float64 `json:"UnitPriceDiscount"`
-			} `json:"InstancePrice"`
-		} `json:"Price"`
-		RequestID string `json:"RequestId"`
+		Price     haiPrice `json:"Price"`
+		RequestID string   `json:"RequestId"`
 	} `json:"Response"`
+}
+
+type haiPrice struct {
+	InstancePrice  haiItemPrice `json:"InstancePrice"`
+	CloudDiskPrice haiItemPrice `json:"CloudDiskPrice"`
+}
+
+func (p haiPrice) hourlyUnitPriceCNY() float64 {
+	instancePrice := p.InstancePrice.hourlyUnitPriceCNY()
+	if instancePrice <= 0 {
+		return 0
+	}
+	return instancePrice + p.CloudDiskPrice.hourlyUnitPriceCNY()
+}
+
+type haiItemPrice struct {
+	UnitPrice         float64 `json:"UnitPrice"`
+	DiscountUnitPrice float64 `json:"DiscountUnitPrice"`
+}
+
+func (p haiItemPrice) hourlyUnitPriceCNY() float64 {
+	if p.DiscountUnitPrice > 0 {
+		return p.DiscountUnitPrice
+	}
+	return p.UnitPrice
 }
 
 type haiRequestIDResponse struct {
