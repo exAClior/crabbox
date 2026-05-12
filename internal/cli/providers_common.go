@@ -63,7 +63,7 @@ func touchDirectLeaseBestEffort(ctx context.Context, cfg Config, server Server, 
 		}
 		return server
 	}
-	if cfg.Provider == "tencent" || server.Provider == "tencent" || strings.HasPrefix(server.CloudID, "ins-") {
+	if cfg.Provider == "tencent" || server.Provider == "tencent" || strings.HasPrefix(server.CloudID, "hai-") {
 		client, err := newTencentClient(cfg)
 		if err != nil {
 			fmt.Fprintf(stderr, "warning: direct touch state=%s: %v\n", state, err)

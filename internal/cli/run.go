@@ -1406,7 +1406,7 @@ func deleteServer(ctx context.Context, cfg Config, server Server) error {
 		}
 		return client.DeleteServer(ctx, server.CloudID)
 	}
-	if cfg.Provider == "tencent" || server.Provider == "tencent" || strings.HasPrefix(server.CloudID, "ins-") {
+	if cfg.Provider == "tencent" || server.Provider == "tencent" || strings.HasPrefix(server.CloudID, "hai-") {
 		client, err := newTencentClient(cfg)
 		if err != nil {
 			return err

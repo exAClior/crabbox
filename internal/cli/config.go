@@ -13,90 +13,88 @@ import (
 )
 
 type Config struct {
-	Profile            string
-	Provider           string
-	TargetOS           string
-	WindowsMode        string
-	Desktop            bool
-	Browser            bool
-	Code               bool
-	Network            NetworkMode
-	Class              string
-	ServerType         string
-	ServerTypeExplicit bool
-	Coordinator        string
-	CoordToken         string
-	CoordAdminToken    string
-	Access             AccessConfig
-	Location           string
-	Image              string
-	AWSRegion          string
-	AWSAMI             string
-	AWSSGID            string
-	AWSSubnetID        string
-	AWSProfile         string
-	AWSRootGB          int32
-	AWSSSHCIDRs        []string
-	AWSMacHostID       string
-	AzureSubscription  string
-	AzureTenant        string
-	AzureClientID      string
-	AzureLocation      string
-	AzureResourceGroup string
-	AzureImage         string
-	AzureVNet          string
-	AzureSubnet        string
-	AzureNSG           string
-	AzureSSHCIDRs      []string
-	AzureNetwork       string
-	GCPProject         string
-	gcpProjectExplicit bool
-	GCPZone            string
-	gcpZoneExplicit    bool
-	GCPImage           string
-	gcpImageExplicit   bool
-	GCPNetwork         string
-	gcpNetworkExplicit bool
-	GCPSubnet          string
-	GCPTags            []string
-	gcpTagsExplicit    bool
-	GCPSSHCIDRs        []string
-	GCPRootGB          int64
-	gcpRootGBExplicit  bool
-	GCPServiceAccount  string
-	TencentSecretID    string
-	TencentSecretKey   string
-	TencentRegion      string
-	TencentZone        string
-	TencentImageID     string
-	TencentVpcID       string
-	TencentSubnetID    string
-	TencentRootGB      int64
-	Proxmox            ProxmoxConfig
-	SSHUser            string
-	SSHKey             string
-	SSHPort            string
-	SSHFallbackPorts   []string
-	ProviderKey        string
-	WorkRoot           string
-	TTL                time.Duration
-	IdleTimeout        time.Duration
-	Sync               SyncConfig
-	EnvAllow           []string
-	Capacity           CapacityConfig
-	Actions            ActionsConfig
-	Blacksmith         BlacksmithConfig
-	Namespace          NamespaceConfig
-	Daytona            DaytonaConfig
-	E2B                E2BConfig
-	Islo               IsloConfig
-	Semaphore          SemaphoreConfig
-	Sprites            SpritesConfig
-	Tailscale          TailscaleConfig
-	Static             StaticConfig
-	Results            ResultsConfig
-	Cache              CacheConfig
-	Jobs               map[string]JobConfig
+	Profile              string
+	Provider             string
+	TargetOS             string
+	WindowsMode          string
+	Desktop              bool
+	Browser              bool
+	Code                 bool
+	Network              NetworkMode
+	Class                string
+	ServerType           string
+	ServerTypeExplicit   bool
+	Coordinator          string
+	CoordToken           string
+	CoordAdminToken      string
+	Access               AccessConfig
+	Location             string
+	Image                string
+	AWSRegion            string
+	AWSAMI               string
+	AWSSGID              string
+	AWSSubnetID          string
+	AWSProfile           string
+	AWSRootGB            int32
+	AWSSSHCIDRs          []string
+	AWSMacHostID         string
+	AzureSubscription    string
+	AzureTenant          string
+	AzureClientID        string
+	AzureLocation        string
+	AzureResourceGroup   string
+	AzureImage           string
+	AzureVNet            string
+	AzureSubnet          string
+	AzureNSG             string
+	AzureSSHCIDRs        []string
+	AzureNetwork         string
+	GCPProject           string
+	gcpProjectExplicit   bool
+	GCPZone              string
+	gcpZoneExplicit      bool
+	GCPImage             string
+	gcpImageExplicit     bool
+	GCPNetwork           string
+	gcpNetworkExplicit   bool
+	GCPSubnet            string
+	GCPTags              []string
+	gcpTagsExplicit      bool
+	GCPSSHCIDRs          []string
+	GCPRootGB            int64
+	gcpRootGBExplicit    bool
+	GCPServiceAccount    string
+	TencentSecretID      string
+	TencentSecretKey     string
+	TencentRegion        string
+	TencentApplicationID string
+	TencentBundleType    string
+	TencentSystemDiskGB  int64
+	Proxmox              ProxmoxConfig
+	SSHUser              string
+	SSHKey               string
+	SSHPort              string
+	SSHFallbackPorts     []string
+	ProviderKey          string
+	WorkRoot             string
+	TTL                  time.Duration
+	IdleTimeout          time.Duration
+	Sync                 SyncConfig
+	EnvAllow             []string
+	Capacity             CapacityConfig
+	Actions              ActionsConfig
+	Blacksmith           BlacksmithConfig
+	Namespace            NamespaceConfig
+	Daytona              DaytonaConfig
+	E2B                  E2BConfig
+	Islo                 IsloConfig
+	Semaphore            SemaphoreConfig
+	Sprites              SpritesConfig
+	Tailscale            TailscaleConfig
+	Static               StaticConfig
+	Results              ResultsConfig
+	Cache                CacheConfig
+	Jobs                 map[string]JobConfig
 }
 
 type SyncConfig struct {
@@ -347,39 +345,39 @@ func baseConfig() Config {
 	class := "beast"
 	provider := "hetzner"
 	return Config{
-		Profile:            "default",
-		Provider:           provider,
-		TargetOS:           "linux",
-		WindowsMode:        "normal",
-		Network:            NetworkAuto,
-		Class:              class,
-		ServerType:         "",
-		Location:           "fsn1",
-		Image:              "ubuntu-24.04",
-		AWSRegion:          "eu-west-1",
-		AWSRootGB:          400,
-		AzureLocation:      "eastus",
-		AzureResourceGroup: "crabbox-leases",
-		AzureImage:         defaultAzureLinuxImage,
-		AzureVNet:          "crabbox-vnet",
-		AzureSubnet:        "crabbox-subnet",
-		AzureNSG:           "crabbox-nsg",
-		GCPZone:            "europe-west2-a",
-		GCPImage:           defaultGCPLinuxImage,
-		GCPNetwork:         "default",
-		GCPTags:            []string{"crabbox-ssh"},
-		GCPRootGB:          400,
-		TencentRegion:      "ap-singapore",
-		TencentZone:        "ap-singapore-2",
-		TencentRootGB:      400,
-		SSHUser:            "crabbox",
-		SSHKey:             sshKey,
-		SSHPort:            "2222",
-		SSHFallbackPorts:   []string{"22"},
-		ProviderKey:        "crabbox-steipete",
-		WorkRoot:           defaultPOSIXWorkRoot,
-		TTL:                90 * time.Minute,
-		IdleTimeout:        30 * time.Minute,
+		Profile:              "default",
+		Provider:             provider,
+		TargetOS:             "linux",
+		WindowsMode:          "normal",
+		Network:              NetworkAuto,
+		Class:                class,
+		ServerType:           "",
+		Location:             "fsn1",
+		Image:                "ubuntu-24.04",
+		AWSRegion:            "eu-west-1",
+		AWSRootGB:            400,
+		AzureLocation:        "eastus",
+		AzureResourceGroup:   "crabbox-leases",
+		AzureImage:           defaultAzureLinuxImage,
+		AzureVNet:            "crabbox-vnet",
+		AzureSubnet:          "crabbox-subnet",
+		AzureNSG:             "crabbox-nsg",
+		GCPZone:              "europe-west2-a",
+		GCPImage:             defaultGCPLinuxImage,
+		GCPNetwork:           "default",
+		GCPTags:              []string{"crabbox-ssh"},
+		GCPRootGB:            400,
+		TencentRegion:        "ap-singapore",
+		TencentApplicationID: tencentHAIDefaultAppID,
+		TencentSystemDiskGB:  tencentHAIDefaultDiskGB,
+		SSHUser:              "crabbox",
+		SSHKey:               sshKey,
+		SSHPort:              "2222",
+		SSHFallbackPorts:     []string{"22"},
+		ProviderKey:          "crabbox-steipete",
+		WorkRoot:             defaultPOSIXWorkRoot,
+		TTL:                  90 * time.Minute,
+		IdleTimeout:          30 * time.Minute,
 		Sync: SyncConfig{
 			Delete:      true,
 			Checksum:    false,
@@ -558,14 +556,12 @@ type fileGCPConfig struct {
 }
 
 type fileTencentConfig struct {
-	SecretID  string `yaml:"secretId,omitempty"`
-	SecretKey string `yaml:"secretKey,omitempty"`
-	Region    string `yaml:"region,omitempty"`
-	Zone      string `yaml:"zone,omitempty"`
-	ImageID   string `yaml:"imageId,omitempty"`
-	VpcID     string `yaml:"vpcId,omitempty"`
-	SubnetID  string `yaml:"subnetId,omitempty"`
-	RootGB    int64  `yaml:"rootGB,omitempty"`
+	SecretID      string `yaml:"secretId,omitempty"`
+	SecretKey     string `yaml:"secretKey,omitempty"`
+	Region        string `yaml:"region,omitempty"`
+	ApplicationID string `yaml:"applicationId,omitempty"`
+	BundleType    string `yaml:"bundleType,omitempty"`
+	SystemDiskGB  int64  `yaml:"systemDiskGB,omitempty"`
 }
 
 type fileProxmoxConfig struct {
@@ -1052,20 +1048,14 @@ func applyFileConfig(cfg *Config, file fileConfig) {
 		if file.Tencent.Region != "" {
 			cfg.TencentRegion = file.Tencent.Region
 		}
-		if file.Tencent.Zone != "" {
-			cfg.TencentZone = file.Tencent.Zone
+		if file.Tencent.ApplicationID != "" {
+			cfg.TencentApplicationID = file.Tencent.ApplicationID
 		}
-		if file.Tencent.ImageID != "" {
-			cfg.TencentImageID = file.Tencent.ImageID
+		if file.Tencent.BundleType != "" {
+			cfg.TencentBundleType = file.Tencent.BundleType
 		}
-		if file.Tencent.VpcID != "" {
-			cfg.TencentVpcID = file.Tencent.VpcID
-		}
-		if file.Tencent.SubnetID != "" {
-			cfg.TencentSubnetID = file.Tencent.SubnetID
-		}
-		if file.Tencent.RootGB > 0 {
-			cfg.TencentRootGB = file.Tencent.RootGB
+		if file.Tencent.SystemDiskGB > 0 {
+			cfg.TencentSystemDiskGB = file.Tencent.SystemDiskGB
 		}
 	}
 	if file.Proxmox != nil {
@@ -1644,11 +1634,9 @@ func applyEnv(cfg *Config) {
 	cfg.TencentSecretID = getenv("CRABBOX_TENCENT_SECRET_ID", getenv("TENCENT_SECRET_ID", getenv("TENCENTCLOUD_SECRET_ID", cfg.TencentSecretID)))
 	cfg.TencentSecretKey = getenv("CRABBOX_TENCENT_SECRET_KEY", getenv("TENCENT_SECRET_KEY", getenv("TENCENTCLOUD_SECRET_KEY", cfg.TencentSecretKey)))
 	cfg.TencentRegion = getenv("CRABBOX_TENCENT_REGION", cfg.TencentRegion)
-	cfg.TencentZone = getenv("CRABBOX_TENCENT_ZONE", cfg.TencentZone)
-	cfg.TencentImageID = getenv("CRABBOX_TENCENT_IMAGE_ID", cfg.TencentImageID)
-	cfg.TencentVpcID = getenv("CRABBOX_TENCENT_VPC_ID", cfg.TencentVpcID)
-	cfg.TencentSubnetID = getenv("CRABBOX_TENCENT_SUBNET_ID", cfg.TencentSubnetID)
-	cfg.TencentRootGB = int64(getenvInt("CRABBOX_TENCENT_ROOT_GB", int(cfg.TencentRootGB)))
+	cfg.TencentApplicationID = getenv("CRABBOX_TENCENT_APPLICATION_ID", cfg.TencentApplicationID)
+	cfg.TencentBundleType = getenv("CRABBOX_TENCENT_BUNDLE_TYPE", cfg.TencentBundleType)
+	cfg.TencentSystemDiskGB = int64(getenvInt("CRABBOX_TENCENT_SYSTEM_DISK_GB", int(cfg.TencentSystemDiskGB)))
 	cfg.Proxmox.APIURL = getenv("CRABBOX_PROXMOX_API_URL", cfg.Proxmox.APIURL)
 	cfg.Proxmox.TokenID = getenv("CRABBOX_PROXMOX_TOKEN_ID", cfg.Proxmox.TokenID)
 	cfg.Proxmox.TokenSecret = getenv("CRABBOX_PROXMOX_TOKEN_SECRET", cfg.Proxmox.TokenSecret)
@@ -1874,7 +1862,10 @@ func serverTypeForConfig(cfg Config) string {
 		return gcpMachineTypeCandidatesForClass(cfg.Class)[0]
 	}
 	if cfg.Provider == "tencent" {
-		return tencentInstanceTypeCandidatesForClass(cfg.Class)[0]
+		if cfg.TencentBundleType != "" {
+			return cfg.TencentBundleType
+		}
+		return tencentBundleTypeCandidatesForClass(cfg.Class)[0]
 	}
 	if cfg.Provider == "proxmox" {
 		return proxmoxServerTypeForConfig(cfg)
@@ -1908,7 +1899,7 @@ func serverTypeForProviderClass(provider, class string) string {
 		return gcpMachineTypeCandidatesForClass(class)[0]
 	}
 	if provider == "tencent" {
-		return tencentInstanceTypeCandidatesForClass(class)[0]
+		return tencentBundleTypeCandidatesForClass(class)[0]
 	}
 	if provider == "proxmox" {
 		return "template"

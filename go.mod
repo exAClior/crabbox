@@ -18,11 +18,6 @@ require (
 	github.com/daytonaio/daytona/libs/api-client-go v0.173.0
 	github.com/daytonaio/daytona/libs/sdk-go v0.173.0
 	github.com/islo-labs/go-sdk v0.0.0-20260506134022-b0def8020123
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.3.90
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cvm v1.3.89
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/sts v1.1.11
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/tag v1.3.54
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/vpc v1.3.83
 	google.golang.org/api v0.278.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1

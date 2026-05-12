@@ -1,28 +1,30 @@
 package cli
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"sort"
+	"io"
+	"net/http"
 	"strings"
 	"time"
-
-	tccommon "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
-	tcerrors "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/errors"
-	tcprofile "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
-	tccvm "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/cvm/v20170312"
-	tcsts "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/sts/v20180813"
-	tctag "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/tag/v20180813"
-	tcvpc "github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/vpc/v20170312"
 )
 
 const (
-	tencentChargeTypePostpaid = "POSTPAID_BY_HOUR"
-	tencentSecurityGroupName  = "crabbox-runners"
-	tencentSSHBandwidthMbps   = int64(10)
+	tencentHAIEndpoint          = "https://hai.tencentcloudapi.com"
+	tencentHAIHost              = "hai.tencentcloudapi.com"
+	tencentHAIService           = "hai"
+	tencentHAIVersion           = "2023-08-12"
+	tencentHAIDefaultAppID      = "app-1tjmypf1"
+	tencentHAIDefaultDiskGB     = int64(80)
+	tencentHAIDefaultDiskType   = "CLOUD_PREMIUM"
+	tencentHAIInstanceNamePrefx = "crabbox-"
 )
 
 func init() {
@@ -32,7 +34,7 @@ func init() {
 type tencentProvider struct{}
 
 func (tencentProvider) Name() string      { return "tencent" }
-func (tencentProvider) Aliases() []string { return []string{"tencent-cloud"} }
+func (tencentProvider) Aliases() []string { return []string{"tencent-cloud", "tencent-hai"} }
 func (tencentProvider) Spec() ProviderSpec {
 	return ProviderSpec{
 		Name:        "tencent",
@@ -44,26 +46,22 @@ func (tencentProvider) Spec() ProviderSpec {
 }
 
 type tencentFlagValues struct {
-	SecretID  *string
-	SecretKey *string
-	Region    *string
-	Zone      *string
-	ImageID   *string
-	VpcID     *string
-	SubnetID  *string
-	RootGB    *int64
+	SecretID     *string
+	SecretKey    *string
+	Region       *string
+	Application  *string
+	BundleType   *string
+	SystemDiskGB *int64
 }
 
 func (tencentProvider) RegisterFlags(fs *flag.FlagSet, defaults Config) any {
 	return tencentFlagValues{
-		SecretID:  fs.String("tencent-secret-id", defaults.TencentSecretID, "Tencent Cloud CAM SecretId"),
-		SecretKey: fs.String("tencent-secret-key", defaults.TencentSecretKey, "Tencent Cloud CAM SecretKey"),
-		Region:    fs.String("tencent-region", defaults.TencentRegion, "Tencent Cloud region"),
-		Zone:      fs.String("tencent-zone", defaults.TencentZone, "Tencent Cloud availability zone"),
-		ImageID:   fs.String("tencent-image-id", defaults.TencentImageID, "Tencent Cloud CVM image ID"),
-		VpcID:     fs.String("tencent-vpc-id", defaults.TencentVpcID, "Tencent Cloud VPC ID"),
-		SubnetID:  fs.String("tencent-subnet-id", defaults.TencentSubnetID, "Tencent Cloud subnet ID"),
-		RootGB:    fs.Int64("tencent-root-gb", defaults.TencentRootGB, "Tencent Cloud root disk size in GB"),
+		SecretID:     fs.String("tencent-secret-id", defaults.TencentSecretID, "Tencent Cloud CAM SecretId"),
+		SecretKey:    fs.String("tencent-secret-key", defaults.TencentSecretKey, "Tencent Cloud CAM SecretKey"),
+		Region:       fs.String("tencent-region", defaults.TencentRegion, "Tencent Cloud HAI region"),
+		Application:  fs.String("tencent-application-id", defaults.TencentApplicationID, "Tencent Cloud HAI application ID"),
+		BundleType:   fs.String("tencent-bundle-type", defaults.TencentBundleType, "Tencent Cloud HAI bundle type"),
+		SystemDiskGB: fs.Int64("tencent-system-disk-gb", defaults.TencentSystemDiskGB, "Tencent Cloud HAI system disk size in GB"),
 	}
 }
 
@@ -81,20 +79,15 @@ func (tencentProvider) ApplyFlags(cfg *Config, fs *flag.FlagSet, values any) err
 	if flagWasSet(fs, "tencent-region") {
 		cfg.TencentRegion = *v.Region
 	}
-	if flagWasSet(fs, "tencent-zone") {
-		cfg.TencentZone = *v.Zone
+	if flagWasSet(fs, "tencent-application-id") {
+		cfg.TencentApplicationID = *v.Application
 	}
-	if flagWasSet(fs, "tencent-image-id") {
-		cfg.TencentImageID = *v.ImageID
+	if flagWasSet(fs, "tencent-bundle-type") {
+		cfg.TencentBundleType = *v.BundleType
+		cfg.ServerType = *v.BundleType
 	}
-	if flagWasSet(fs, "tencent-vpc-id") {
-		cfg.TencentVpcID = *v.VpcID
-	}
-	if flagWasSet(fs, "tencent-subnet-id") {
-		cfg.TencentSubnetID = *v.SubnetID
-	}
-	if flagWasSet(fs, "tencent-root-gb") {
-		cfg.TencentRootGB = *v.RootGB
+	if flagWasSet(fs, "tencent-system-disk-gb") {
+		cfg.TencentSystemDiskGB = *v.SystemDiskGB
 	}
 	return nil
 }
@@ -123,20 +116,15 @@ func (b *tencentBackend) Acquire(ctx context.Context, req AcquireRequest) (Lease
 		return LeaseTarget{}, err
 	}
 	slug := allocateDirectLeaseSlug(leaseID, servers)
-	keyPath, publicKey, err := ensureTestboxKeyWithType(leaseID, "rsa")
-	if err != nil {
-		return LeaseTarget{}, err
-	}
-	cfg.SSHKey = keyPath
-	cfg.ProviderKey = tencentProviderKeyForLease(leaseID)
-	fmt.Fprintf(b.rt.Stderr, "provisioning provider=tencent lease=%s slug=%s class=%s preferred_type=%s region=%s zone=%s keep=%v\n", leaseID, slug, cfg.Class, cfg.ServerType, cfg.TencentRegion, cfg.TencentZone, req.Keep)
-	server, cfg, err := client.CreateServerWithFallback(ctx, cfg, publicKey, leaseID, slug, req.Keep, func(format string, args ...any) {
+	cfg.ProviderKey = ""
+	fmt.Fprintf(b.rt.Stderr, "provisioning provider=tencent-hai lease=%s slug=%s class=%s bundle=%s region=%s application=%s keep=%v\n", leaseID, slug, cfg.Class, cfg.ServerType, cfg.TencentRegion, cfg.TencentApplicationID, req.Keep)
+	server, cfg, err := client.CreateServerWithFallback(ctx, cfg, leaseID, slug, req.Keep, func(format string, args ...any) {
 		fmt.Fprintf(b.rt.Stderr, format, args...)
 	})
 	if err != nil {
 		return LeaseTarget{}, err
 	}
-	fmt.Fprintf(b.rt.Stderr, "provisioned lease=%s server=%s type=%s\n", leaseID, server.DisplayID(), cfg.ServerType)
+	fmt.Fprintf(b.rt.Stderr, "provisioned lease=%s server=%s bundle=%s\n", leaseID, server.DisplayID(), cfg.ServerType)
 	server, err = client.waitForServerIP(ctx, server.CloudID)
 	if err != nil {
 		return LeaseTarget{}, err
@@ -146,12 +134,9 @@ func (b *tencentBackend) Acquire(ctx context.Context, req AcquireRequest) (Lease
 		if !req.Keep {
 			_ = client.DeleteServer(context.Background(), server.CloudID)
 		}
-		return LeaseTarget{}, err
+		return LeaseTarget{}, fmt.Errorf("HAI instance was created, but SSH bootstrap did not complete; HAI does not expose CVM cloud-init or SSH key injection for Crabbox: %w", err)
 	}
 	server.Labels["state"] = "ready"
-	if err := client.SetLabels(ctx, server.CloudID, server.Labels); err != nil {
-		fmt.Fprintf(b.rt.Stderr, "warning: set tags: %v\n", err)
-	}
 	return LeaseTarget{Server: server, SSH: target, LeaseID: leaseID}, nil
 }
 
@@ -162,7 +147,7 @@ func (b *tencentBackend) Resolve(ctx context.Context, req ResolveRequest) (Lease
 	}
 	var server Server
 	var leaseID string
-	if strings.HasPrefix(req.ID, "ins-") {
+	if strings.HasPrefix(req.ID, "hai-") {
 		server, err = client.GetServer(ctx, req.ID)
 		if err != nil {
 			return LeaseTarget{}, err
@@ -202,39 +187,25 @@ func (b *tencentBackend) ReleaseLease(ctx context.Context, req ReleaseLeaseReque
 		return err
 	}
 	if req.Lease.Server.CloudID != "" {
-		if err := client.DeleteServer(ctx, req.Lease.Server.CloudID); err != nil {
-			return err
-		}
-	}
-	if keyName := serverProviderKey(req.Lease.Server); validTencentProviderKey(keyName) {
-		return client.DeleteSSHKey(ctx, keyName)
+		return client.DeleteServer(ctx, req.Lease.Server.CloudID)
 	}
 	return nil
 }
 
 func (b *tencentBackend) Touch(ctx context.Context, req TouchRequest) (Server, error) {
-	client, err := newTencentClient(b.cfg)
-	if err != nil {
-		return req.Lease.Server, err
-	}
 	server := req.Lease.Server
 	if server.Labels == nil {
 		server.Labels = map[string]string{}
 	}
 	server.Labels = touchDirectLeaseLabels(server.Labels, b.cfg, req.State, time.Now().UTC())
-	if err := client.SetLabels(ctx, server.CloudID, server.Labels); err != nil {
-		return server, err
-	}
 	return server, nil
 }
 
 type TencentClient struct {
-	cvm       *tccvm.Client
-	vpc       *tcvpc.Client
-	tag       *tctag.Client
-	sts       *tcsts.Client
+	secretID  string
+	secretKey string
 	region    string
-	accountID string
+	http      *http.Client
 	cfg       Config
 }
 
@@ -257,311 +228,153 @@ func newTencentClient(cfg Config) (*TencentClient, error) {
 	if region == "" {
 		return nil, exit(3, "tencent.region or CRABBOX_TENCENT_REGION is required")
 	}
-
-	credential := tccommon.NewCredential(secretID, secretKey)
-	cvmClient, err := tccvm.NewClient(credential, region, tcprofile.NewClientProfile())
-	if err != nil {
-		return nil, err
-	}
-	vpcClient, err := tcvpc.NewClient(credential, region, tcprofile.NewClientProfile())
-	if err != nil {
-		return nil, err
-	}
-	tagClient, err := tctag.NewClient(credential, region, tcprofile.NewClientProfile())
-	if err != nil {
-		return nil, err
-	}
-	stsClient, err := tcsts.NewClient(credential, region, tcprofile.NewClientProfile())
-	if err != nil {
-		return nil, err
-	}
 	cfg.TencentSecretID = secretID
 	cfg.TencentSecretKey = secretKey
 	cfg.TencentRegion = region
-	return &TencentClient{cvm: cvmClient, vpc: vpcClient, tag: tagClient, sts: stsClient, region: region, cfg: cfg}, nil
+	return &TencentClient{secretID: secretID, secretKey: secretKey, region: region, http: &http.Client{Timeout: 60 * time.Second}, cfg: cfg}, nil
 }
 
 func (c *TencentClient) ListCrabboxServers(ctx context.Context) ([]Server, error) {
 	servers := make([]Server, 0)
-	offset := int64(0)
-	limit := int64(100)
+	offset := 0
+	limit := 100
 	for {
-		req := tccvm.NewDescribeInstancesRequest()
-		req.Filters = []*tccvm.Filter{
-			{Name: tccommon.StringPtr("tag:crabbox"), Values: tccommon.StringPtrs([]string{"true"})},
-		}
-		req.Offset = tccommon.Int64Ptr(offset)
-		req.Limit = tccommon.Int64Ptr(limit)
-		resp, err := c.cvm.DescribeInstancesWithContext(ctx, req)
-		if err != nil {
+		var resp haiDescribeInstancesResponse
+		if err := c.do(ctx, "DescribeInstances", map[string]any{"Offset": offset, "Limit": limit}, &resp); err != nil {
 			return nil, err
 		}
-		if resp == nil || resp.Response == nil {
-			return servers, nil
-		}
-		set := resp.Response.InstanceSet
-		for _, instance := range set {
-			if instance != nil {
-				servers = append(servers, tencentInstanceToServer(instance))
+		for _, instance := range resp.Response.InstanceSet {
+			server := tencentHAIInstanceToServer(instance)
+			if strings.HasPrefix(server.Name, tencentHAIInstanceNamePrefx) {
+				servers = append(servers, server)
 			}
 		}
-		if len(set) == 0 || int64(len(set)) < limit {
+		if len(resp.Response.InstanceSet) == 0 || len(resp.Response.InstanceSet) < limit || offset+len(resp.Response.InstanceSet) >= resp.Response.TotalCount {
 			return servers, nil
 		}
-		offset += int64(len(set))
-		if resp.Response.TotalCount != nil && offset >= *resp.Response.TotalCount {
-			return servers, nil
-		}
+		offset += len(resp.Response.InstanceSet)
 	}
 }
 
-func (c *TencentClient) EnsureSSHKey(ctx context.Context, name, publicKey string) (string, error) {
-	name = tencentKeyName(name)
-	key, err := c.findSSHKeyByName(ctx, name)
-	if err != nil {
-		return "", err
-	}
-	if key != nil {
-		if strings.TrimSpace(tcString(key.PublicKey)) != strings.TrimSpace(publicKey) {
-			return "", exit(3, "tencent ssh key %q exists with different public key", name)
-		}
-		return tcString(key.KeyId), nil
-	}
-
-	req := tccvm.NewImportKeyPairRequest()
-	req.KeyName = tccommon.StringPtr(name)
-	req.ProjectId = tccommon.Int64Ptr(0)
-	req.PublicKey = tccommon.StringPtr(publicKey)
-	req.TagSpecification = []*tccvm.TagSpecification{
-		{ResourceType: tccommon.StringPtr("keypair"), Tags: tencentCVMTags(map[string]string{"crabbox": "true", "created_by": "crabbox"})},
-	}
-	resp, err := c.cvm.ImportKeyPairWithContext(ctx, req)
-	if err != nil {
-		// ImportKeyPair is not idempotent. If another process won the race, reuse it.
-		if strings.Contains(tencentErrorCode(err), "Duplicate") || strings.Contains(err.Error(), "already") {
-			key, findErr := c.findSSHKeyByName(ctx, name)
-			if findErr == nil && key != nil {
-				return tcString(key.KeyId), nil
-			}
-		}
-		return "", err
-	}
-	if resp == nil || resp.Response == nil || tcString(resp.Response.KeyId) == "" {
-		return "", exit(5, "tencent returned no ssh key id")
-	}
-	return tcString(resp.Response.KeyId), nil
-}
-
-func (c *TencentClient) DeleteSSHKey(ctx context.Context, name string) error {
-	name = tencentKeyName(name)
-	key, err := c.findSSHKeyByName(ctx, name)
-	if err != nil {
-		return err
-	}
-	if key == nil || tcString(key.KeyId) == "" {
-		return nil
-	}
-	req := tccvm.NewDeleteKeyPairsRequest()
-	req.KeyIds = tccommon.StringPtrs([]string{tcString(key.KeyId)})
-	_, err = c.cvm.DeleteKeyPairsWithContext(ctx, req)
-	if isTencentKeyNotFound(err) {
-		return nil
-	}
-	return err
-}
-
-func (c *TencentClient) CreateServerWithFallback(ctx context.Context, cfg Config, publicKey, leaseID, slug string, keep bool, logf func(string, ...any)) (Server, Config, error) {
-	if cfg.ProviderKey == "" {
-		cfg.ProviderKey = tencentProviderKeyForLease(leaseID)
-	}
-	cfg.ProviderKey = tencentKeyName(cfg.ProviderKey)
-	keyID, err := c.EnsureSSHKey(ctx, cfg.ProviderKey, publicKey)
-	if err != nil {
-		return Server{}, cfg, err
-	}
-	securityGroupID, err := c.ensureSecurityGroup(ctx, cfg)
-	if err != nil {
-		return Server{}, cfg, err
-	}
+func (c *TencentClient) CreateServerWithFallback(ctx context.Context, cfg Config, leaseID, slug string, keep bool, logf func(string, ...any)) (Server, Config, error) {
 	candidates := tencentLaunchCandidates(cfg)
 	var errs []error
-	for i, instanceType := range candidates {
+	for i, bundleType := range candidates {
 		next := cfg
-		next.ServerType = instanceType
+		next.ServerType = bundleType
 		if i > 0 && logf != nil {
-			logf("fallback provisioning type=%s after capacity rejection\n", instanceType)
+			logf("fallback provisioning bundle=%s after capacity rejection\n", bundleType)
 		}
-		server, err := c.createServer(ctx, next, publicKey, leaseID, slug, keep, keyID, securityGroupID)
+		server, err := c.createServer(ctx, next, leaseID, slug, keep)
 		if err == nil {
 			return server, next, nil
 		}
-		errs = append(errs, fmt.Errorf("%s: %w", instanceType, err))
+		errs = append(errs, fmt.Errorf("%s: %w", bundleType, err))
 		if !isRetryableTencentProvisioningError(err) {
 			return Server{}, next, joinErrors(errs)
 		}
 	}
 	if cfg.ServerTypeExplicit {
-		return Server{}, cfg, fmt.Errorf("requested exact Tencent instance type %s failed; remove --type to allow class fallback: %w", cfg.ServerType, joinErrors(errs))
+		return Server{}, cfg, fmt.Errorf("requested exact Tencent HAI bundle %s failed; remove --type to allow class fallback: %w", cfg.ServerType, joinErrors(errs))
 	}
 	return Server{}, cfg, joinErrors(errs)
 }
 
-func (c *TencentClient) createServer(ctx context.Context, cfg Config, publicKey, leaseID, slug string, keep bool, keyID, securityGroupID string) (Server, error) {
-	if cfg.TencentZone == "" {
-		return Server{}, exit(3, "tencent.zone is required")
+func (c *TencentClient) createServer(ctx context.Context, cfg Config, leaseID, slug string, keep bool) (Server, error) {
+	applicationID := strings.TrimSpace(cfg.TencentApplicationID)
+	if applicationID == "" {
+		applicationID = tencentHAIDefaultAppID
 	}
-	if cfg.TencentImageID == "" {
-		return Server{}, exit(3, "tencent.imageId is required")
+	bundleType := strings.TrimSpace(cfg.ServerType)
+	if bundleType == "" {
+		bundleType = tencentBundleTypeCandidatesForClass(cfg.Class)[0]
 	}
-	vpcID, subnetID, err := tencentNetwork(cfg)
-	if err != nil {
-		return Server{}, err
-	}
-	rootGB := cfg.TencentRootGB
-	if rootGB <= 0 {
-		rootGB = 400
+	diskGB := cfg.TencentSystemDiskGB
+	if diskGB <= 0 {
+		diskGB = tencentHAIDefaultDiskGB
 	}
 	name := leaseProviderName(leaseID, slug)
 	now := time.Now().UTC()
-	labels := directLeaseLabels(cfg, leaseID, slug, "tencent", "on-demand", keep, now)
-	one := int64(1)
-	req := tccvm.NewRunInstancesRequest()
-	req.InstanceChargeType = tccommon.StringPtr(tencentChargeTypePostpaid)
-	req.Placement = &tccvm.Placement{Zone: tccommon.StringPtr(cfg.TencentZone)}
-	req.ImageId = tccommon.StringPtr(cfg.TencentImageID)
-	req.InstanceType = tccommon.StringPtr(cfg.ServerType)
-	req.SystemDisk = &tccvm.SystemDisk{DiskType: tccommon.StringPtr("CLOUD_PREMIUM"), DiskSize: tccommon.Int64Ptr(rootGB)}
-	req.VirtualPrivateCloud = &tccvm.VirtualPrivateCloud{VpcId: tccommon.StringPtr(vpcID), SubnetId: tccommon.StringPtr(subnetID)}
-	req.InternetAccessible = &tccvm.InternetAccessible{
-		InternetChargeType:      tccommon.StringPtr("TRAFFIC_POSTPAID_BY_HOUR"),
-		InternetMaxBandwidthOut: tccommon.Int64Ptr(tencentSSHBandwidthMbps),
-		PublicIpAssigned:        tccommon.BoolPtr(true),
+	labels := directLeaseLabels(cfg, leaseID, slug, "tencent", "hai", keep, now)
+	labels["application_id"] = applicationID
+	req := haiRunInstancesRequest{
+		ApplicationID: applicationID,
+		BundleType:    bundleType,
+		SystemDisk:    &haiSystemDisk{DiskType: tencentHAIDefaultDiskType, DiskSize: diskGB},
+		InstanceCount: 1,
+		InstanceName:  name,
+		ClientToken:   leaseID,
 	}
-	req.InstanceCount = tccommon.Int64Ptr(one)
-	req.MinCount = tccommon.Int64Ptr(one)
-	req.InstanceName = tccommon.StringPtr(name)
-	req.LoginSettings = &tccvm.LoginSettings{KeyIds: tccommon.StringPtrs([]string{keyID})}
-	req.SecurityGroupIds = tccommon.StringPtrs([]string{securityGroupID})
-	req.EnhancedService = &tccvm.EnhancedService{
-		SecurityService: &tccvm.RunSecurityServiceEnabled{Enabled: tccommon.BoolPtr(true)},
-		MonitorService:  &tccvm.RunMonitorServiceEnabled{Enabled: tccommon.BoolPtr(true)},
-	}
-	req.ClientToken = tccommon.StringPtr(leaseID)
-	req.TagSpecification = []*tccvm.TagSpecification{{ResourceType: tccommon.StringPtr("instance"), Tags: tencentCVMTags(labels)}}
-	req.UserData = tccommon.StringPtr(base64.StdEncoding.EncodeToString([]byte(cloudInit(cfg, publicKey))))
-
-	resp, err := c.cvm.RunInstancesWithContext(ctx, req)
-	if err != nil {
+	var resp haiRunInstancesResponse
+	if err := c.do(ctx, "RunInstances", req, &resp); err != nil {
 		return Server{}, err
 	}
-	if resp == nil || resp.Response == nil || len(resp.Response.InstanceIdSet) == 0 || tcString(resp.Response.InstanceIdSet[0]) == "" {
-		return Server{}, exit(5, "tencent returned no instances")
+	if len(resp.Response.InstanceIDSet) == 0 || resp.Response.InstanceIDSet[0] == "" {
+		return Server{}, exit(5, "tencent HAI returned no instances")
 	}
-	server := Server{
-		CloudID:  tcString(resp.Response.InstanceIdSet[0]),
-		Provider: "tencent",
-		Name:     name,
-		Status:   "pending",
-		Labels:   labels,
-	}
-	server.ServerType.Name = cfg.ServerType
+	server := Server{CloudID: resp.Response.InstanceIDSet[0], Provider: "tencent", Name: name, Status: "pending", Labels: labels}
+	server.ServerType.Name = bundleType
 	return server, nil
 }
 
 func (c *TencentClient) GetServer(ctx context.Context, id string) (Server, error) {
-	req := tccvm.NewDescribeInstancesRequest()
-	req.InstanceIds = tccommon.StringPtrs([]string{id})
-	resp, err := c.cvm.DescribeInstancesWithContext(ctx, req)
-	if err != nil {
+	var resp haiDescribeInstancesResponse
+	if err := c.do(ctx, "DescribeInstances", map[string]any{"InstanceIds": []string{id}, "Offset": 0, "Limit": 1}, &resp); err != nil {
 		return Server{}, err
 	}
-	if resp == nil || resp.Response == nil || len(resp.Response.InstanceSet) == 0 || resp.Response.InstanceSet[0] == nil {
-		return Server{}, exit(4, "tencent instance not found: %s", id)
+	if len(resp.Response.InstanceSet) == 0 {
+		return Server{}, exit(4, "tencent HAI instance not found: %s", id)
 	}
-	return tencentInstanceToServer(resp.Response.InstanceSet[0]), nil
+	return tencentHAIInstanceToServer(resp.Response.InstanceSet[0]), nil
 }
 
 func (c *TencentClient) DeleteServer(ctx context.Context, id string) error {
-	req := tccvm.NewTerminateInstancesRequest()
-	req.InstanceIds = tccommon.StringPtrs([]string{id})
-	req.ReleaseAddress = tccommon.BoolPtr(false)
-	_, err := c.cvm.TerminateInstancesWithContext(ctx, req)
-	if isTencentInstanceNotFound(err) || strings.Contains(tencentErrorCode(err), "InstanceStateTerminat") {
+	if id == "" {
+		return nil
+	}
+	err := c.do(ctx, "TerminateInstances", map[string]any{"InstanceIds": []string{id}}, &haiRequestIDResponse{})
+	if isTencentInstanceNotFound(err) {
 		return nil
 	}
 	return err
 }
 
 func (c *TencentClient) SetLabels(ctx context.Context, id string, labels map[string]string) error {
-	accountID, err := c.tencentAccountID(ctx)
-	if err != nil {
-		return err
-	}
-	resource := fmt.Sprintf("qcs::cvm:%s:uin/%s:instance/%s", c.region, accountID, id)
-	tags := tencentResourceTags(labels)
-	for len(tags) > 0 {
-		n := len(tags)
-		if n > 9 {
-			n = 9
-		}
-		req := tctag.NewTagResourcesRequest()
-		req.ResourceList = tccommon.StringPtrs([]string{resource})
-		req.Tags = tags[:n]
-		resp, err := c.tag.TagResourcesWithContext(ctx, req)
-		if err != nil {
-			return err
-		}
-		if resp != nil && resp.Response != nil && len(resp.Response.FailedResources) > 0 {
-			fr := resp.Response.FailedResources[0]
-			if fr == nil {
-				return fmt.Errorf("tencent tag failed")
-			}
-			return fmt.Errorf("tencent tag %s failed: %s %s", tcString(fr.Resource), tcString(fr.Code), tcString(fr.Message))
-		}
-		tags = tags[n:]
-	}
 	return nil
 }
+func (c *TencentClient) DeleteSSHKey(ctx context.Context, name string) error { return nil }
 
-func (c *TencentClient) HourlyPriceUSD(ctx context.Context, instanceType string) (float64, error) {
-	fallback := tencentStaticHourlyPriceUSD(instanceType)
-	cfg := c.cfg
-	if cfg.TencentZone == "" || cfg.TencentImageID == "" {
-		return fallback, nil
+func (c *TencentClient) HourlyPriceUSD(ctx context.Context, bundleType string) (float64, error) {
+	diskGB := c.cfg.TencentSystemDiskGB
+	if diskGB <= 0 {
+		diskGB = tencentHAIDefaultDiskGB
 	}
-	vpcID, subnetID, err := tencentNetwork(cfg)
+	applicationID := strings.TrimSpace(c.cfg.TencentApplicationID)
+	if applicationID == "" {
+		applicationID = tencentHAIDefaultAppID
+	}
+	var resp haiInquirePriceRunInstancesResponse
+	err := c.do(ctx, "InquirePriceRunInstances", haiRunInstancesRequest{
+		ApplicationID: applicationID,
+		BundleType:    bundleType,
+		SystemDisk:    &haiSystemDisk{DiskType: tencentHAIDefaultDiskType, DiskSize: diskGB},
+		InstanceCount: 1,
+	}, &resp)
 	if err != nil {
-		return fallback, nil
-	}
-	rootGB := cfg.TencentRootGB
-	if rootGB <= 0 {
-		rootGB = 400
-	}
-	req := tccvm.NewInquiryPriceRunInstancesRequest()
-	req.InstanceChargeType = tccommon.StringPtr(tencentChargeTypePostpaid)
-	req.Placement = &tccvm.Placement{Zone: tccommon.StringPtr(cfg.TencentZone)}
-	req.ImageId = tccommon.StringPtr(cfg.TencentImageID)
-	req.InstanceType = tccommon.StringPtr(instanceType)
-	req.SystemDisk = &tccvm.SystemDisk{DiskType: tccommon.StringPtr("CLOUD_PREMIUM"), DiskSize: tccommon.Int64Ptr(rootGB)}
-	req.VirtualPrivateCloud = &tccvm.VirtualPrivateCloud{VpcId: tccommon.StringPtr(vpcID), SubnetId: tccommon.StringPtr(subnetID)}
-	req.InternetAccessible = &tccvm.InternetAccessible{
-		InternetChargeType:      tccommon.StringPtr("TRAFFIC_POSTPAID_BY_HOUR"),
-		InternetMaxBandwidthOut: tccommon.Int64Ptr(tencentSSHBandwidthMbps),
-		PublicIpAssigned:        tccommon.BoolPtr(true),
-	}
-	req.InstanceCount = tccommon.Int64Ptr(1)
-	resp, err := c.cvm.InquiryPriceRunInstancesWithContext(ctx, req)
-	if err != nil {
+		fallback := tencentStaticHourlyPriceUSD(bundleType)
 		if fallback > 0 {
 			return fallback, nil
 		}
 		return 0, err
 	}
-	price := tencentHourlyPriceFromResponse(resp)
+	price := resp.Response.Price.InstancePrice.UnitPriceDiscount
+	if price <= 0 {
+		price = resp.Response.Price.InstancePrice.UnitPrice
+	}
 	if price > 0 {
 		return price, nil
 	}
-	return fallback, nil
+	return tencentStaticHourlyPriceUSD(bundleType), nil
 }
 
 func (c *TencentClient) waitForServerIP(ctx context.Context, id string) (Server, error) {
@@ -575,198 +388,114 @@ func (c *TencentClient) waitForServerIP(ctx context.Context, id string) (Server,
 			return Server{}, err
 		}
 		if time.Now().After(deadline) {
-			return Server{}, exit(5, "timed out waiting for Tencent instance public IP")
+			return Server{}, exit(5, "timed out waiting for Tencent HAI instance public IP")
 		}
 		time.Sleep(5 * time.Second)
 	}
 }
 
-func (c *TencentClient) findSSHKeyByName(ctx context.Context, name string) (*tccvm.KeyPair, error) {
-	req := tccvm.NewDescribeKeyPairsRequest()
-	req.Filters = []*tccvm.Filter{{Name: tccommon.StringPtr("key-name"), Values: tccommon.StringPtrs([]string{name})}}
-	req.Limit = tccommon.Int64Ptr(100)
-	resp, err := c.cvm.DescribeKeyPairsWithContext(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	if resp == nil || resp.Response == nil {
-		return nil, nil
-	}
-	for _, key := range resp.Response.KeyPairSet {
-		if key != nil && tcString(key.KeyName) == name {
-			return key, nil
+func (c *TencentClient) do(ctx context.Context, action string, body any, out any) error {
+	var payload bytes.Buffer
+	if body != nil {
+		if err := json.NewEncoder(&payload).Encode(body); err != nil {
+			return err
 		}
-	}
-	return nil, nil
-}
-
-func (c *TencentClient) ensureSecurityGroup(ctx context.Context, cfg Config) (string, error) {
-	existing, err := c.findSecurityGroup(ctx, tencentSecurityGroupName)
-	if err != nil {
-		return "", err
-	}
-	var groupID string
-	if existing != nil {
-		groupID = tcString(existing.SecurityGroupId)
 	} else {
-		req := tcvpc.NewCreateSecurityGroupRequest()
-		req.GroupName = tccommon.StringPtr(tencentSecurityGroupName)
-		req.GroupDescription = tccommon.StringPtr("Crabbox ephemeral test runners")
-		req.ProjectId = tccommon.StringPtr("0")
-		req.Tags = tencentVPCTags(map[string]string{"crabbox": "true", "created_by": "crabbox"})
-		resp, err := c.vpc.CreateSecurityGroupWithContext(ctx, req)
-		if err != nil {
-			return "", err
-		}
-		if resp == nil || resp.Response == nil || resp.Response.SecurityGroup == nil || tcString(resp.Response.SecurityGroup.SecurityGroupId) == "" {
-			return "", exit(5, "tencent returned no security group id")
-		}
-		groupID = tcString(resp.Response.SecurityGroup.SecurityGroupId)
+		payload.WriteString("{}")
 	}
-	for _, port := range sshPortCandidates(cfg.SSHPort, cfg.SSHFallbackPorts) {
-		if err := c.allowTCP(ctx, groupID, port); err != nil {
-			return "", err
-		}
-	}
-	if err := c.allowAllEgress(ctx, groupID); err != nil {
-		return "", err
-	}
-	return groupID, nil
-}
-
-func (c *TencentClient) findSecurityGroup(ctx context.Context, name string) (*tcvpc.SecurityGroup, error) {
-	req := tcvpc.NewDescribeSecurityGroupsRequest()
-	req.Filters = []*tcvpc.Filter{
-		{Name: tccommon.StringPtr("security-group-name"), Values: tccommon.StringPtrs([]string{name})},
-	}
-	req.Limit = tccommon.StringPtr("100")
-	resp, err := c.vpc.DescribeSecurityGroupsWithContext(ctx, req)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tencentHAIEndpoint, bytes.NewReader(payload.Bytes()))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if resp == nil || resp.Response == nil {
-		return nil, nil
-	}
-	for _, group := range resp.Response.SecurityGroupSet {
-		if group != nil && tcString(group.SecurityGroupName) == name {
-			return group, nil
-		}
-	}
-	return nil, nil
-}
-
-func (c *TencentClient) allowTCP(ctx context.Context, groupID, port string) error {
-	if _, ok := parsePort32(port); !ok {
-		return exit(2, "invalid SSH port: %s", port)
-	}
-	req := tcvpc.NewCreateSecurityGroupPoliciesRequest()
-	req.SecurityGroupId = tccommon.StringPtr(groupID)
-	req.SecurityGroupPolicySet = &tcvpc.SecurityGroupPolicySet{
-		Ingress: []*tcvpc.SecurityGroupPolicy{
-			{
-				Protocol:          tccommon.StringPtr("TCP"),
-				Port:              tccommon.StringPtr(port),
-				CidrBlock:         tccommon.StringPtr("0.0.0.0/0"),
-				Action:            tccommon.StringPtr("ACCEPT"),
-				PolicyDescription: tccommon.StringPtr("Crabbox SSH"),
-			},
-		},
-	}
-	_, err := c.vpc.CreateSecurityGroupPoliciesWithContext(ctx, req)
-	if strings.Contains(tencentErrorCode(err), "DuplicatePolicy") {
-		return nil
-	}
-	return err
-}
-
-func (c *TencentClient) allowAllEgress(ctx context.Context, groupID string) error {
-	req := tcvpc.NewCreateSecurityGroupPoliciesRequest()
-	req.SecurityGroupId = tccommon.StringPtr(groupID)
-	req.SecurityGroupPolicySet = &tcvpc.SecurityGroupPolicySet{
-		Egress: []*tcvpc.SecurityGroupPolicy{
-			{
-				Protocol:          tccommon.StringPtr("ALL"),
-				Port:              tccommon.StringPtr("all"),
-				CidrBlock:         tccommon.StringPtr("0.0.0.0/0"),
-				Action:            tccommon.StringPtr("ACCEPT"),
-				PolicyDescription: tccommon.StringPtr("Crabbox egress"),
-			},
-		},
-	}
-	_, err := c.vpc.CreateSecurityGroupPoliciesWithContext(ctx, req)
-	if strings.Contains(tencentErrorCode(err), "DuplicatePolicy") {
-		return nil
-	}
-	return err
-}
-
-func (c *TencentClient) tencentAccountID(ctx context.Context) (string, error) {
-	if c.accountID != "" {
-		return c.accountID, nil
-	}
-	resp, err := c.sts.GetCallerIdentityWithContext(ctx, tcsts.NewGetCallerIdentityRequest())
+	tencentSignRequest(req, c.secretID, c.secretKey, c.region, action, payload.Bytes(), time.Now().UTC())
+	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", err
+		return err
 	}
-	if resp == nil || resp.Response == nil || tcString(resp.Response.AccountId) == "" {
-		return "", exit(5, "tencent STS returned no account id")
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
 	}
-	c.accountID = tcString(resp.Response.AccountId)
-	return c.accountID, nil
+	var envelope haiErrorEnvelope
+	if err := json.Unmarshal(data, &envelope); err == nil && envelope.Response.Error != nil {
+		return tencentAPIError{Code: envelope.Response.Error.Code, Message: envelope.Response.Error.Message}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("tencent HAI %s failed: HTTP %d: %s", action, resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+	if out != nil {
+		if err := json.Unmarshal(data, out); err != nil {
+			return fmt.Errorf("decode Tencent HAI %s response: %w", action, err)
+		}
+	}
+	return nil
 }
 
-func tencentInstanceToServer(instance *tccvm.Instance) Server {
-	labels := make(map[string]string)
-	for _, tag := range instance.Tags {
-		if tag == nil {
-			continue
-		}
-		key := tcString(tag.Key)
-		if key != "" {
-			labels[key] = tcString(tag.Value)
-		}
-	}
-	id := tcString(instance.InstanceId)
-	name := tcString(instance.InstanceName)
+func tencentSignRequest(req *http.Request, secretID, secretKey, region, action string, payload []byte, now time.Time) {
+	timestamp := now.Unix()
+	date := now.Format("2006-01-02")
+	hashedPayload := tencentSHA256Hex(payload)
+	canonicalHeaders := "content-type:application/json; charset=utf-8\nhost:" + tencentHAIHost + "\nx-tc-action:" + strings.ToLower(action) + "\n"
+	signedHeaders := "content-type;host;x-tc-action"
+	canonicalRequest := strings.Join([]string{http.MethodPost, "/", "", canonicalHeaders, signedHeaders, hashedPayload}, "\n")
+	credentialScope := date + "/" + tencentHAIService + "/tc3_request"
+	stringToSign := strings.Join([]string{"TC3-HMAC-SHA256", fmt.Sprint(timestamp), credentialScope, tencentSHA256Hex([]byte(canonicalRequest))}, "\n")
+	secretDate := hmacSHA256([]byte("TC3"+secretKey), date)
+	secretService := hmacSHA256(secretDate, tencentHAIService)
+	secretSigning := hmacSHA256(secretService, "tc3_request")
+	signature := hex.EncodeToString(hmacSHA256(secretSigning, stringToSign))
+	authorization := "TC3-HMAC-SHA256 Credential=" + secretID + "/" + credentialScope + ", SignedHeaders=" + signedHeaders + ", Signature=" + signature
+	req.Header.Set("Authorization", authorization)
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	req.Header.Set("Host", tencentHAIHost)
+	req.Header.Set("X-TC-Action", action)
+	req.Header.Set("X-TC-Region", region)
+	req.Header.Set("X-TC-Timestamp", fmt.Sprint(timestamp))
+	req.Header.Set("X-TC-Version", tencentHAIVersion)
+}
+
+func tencentHAIInstanceToServer(instance haiInstance) Server {
+	labels := tencentLabelsFromHAIName(instance.InstanceName)
+	labels["provider"] = "tencent"
+	labels["market"] = "hai"
+	id := instance.InstanceID
+	name := instance.InstanceName
 	if name == "" {
 		name = id
 	}
-	server := Server{
-		CloudID:  id,
-		Provider: "tencent",
-		Name:     name,
-		Status:   strings.ToLower(tcString(instance.InstanceState)),
-		Labels:   labels,
+	server := Server{CloudID: id, Provider: "tencent", Name: name, Status: strings.ToLower(instance.InstanceState), Labels: labels}
+	if len(instance.PublicIPAddresses) > 0 {
+		server.PublicNet.IPv4.IP = instance.PublicIPAddresses[0]
 	}
-	if len(instance.PublicIpAddresses) > 0 {
-		server.PublicNet.IPv4.IP = tcString(instance.PublicIpAddresses[0])
+	if len(instance.PrivateIPAddresses) > 0 {
+		server.PrivateNet.IPv4.IP = instance.PrivateIPAddresses[0]
 	}
-	server.ServerType.Name = tcString(instance.InstanceType)
+	server.ServerType.Name = blank(instance.BundleName, labels["server_type"])
 	return server
 }
 
-func tencentNetwork(cfg Config) (string, string, error) {
-	vpcID := strings.TrimSpace(cfg.TencentVpcID)
-	subnetID := strings.TrimSpace(cfg.TencentSubnetID)
-	if vpcID == "" && subnetID == "" {
-		return "DEFAULT", "DEFAULT", nil
+func tencentLabelsFromHAIName(name string) map[string]string {
+	labels := map[string]string{"crabbox": "true", "created_by": "crabbox"}
+	if strings.HasPrefix(name, tencentHAIInstanceNamePrefx) {
+		trimmed := strings.TrimPrefix(name, tencentHAIInstanceNamePrefx)
+		if head, _, ok := strings.Cut(trimmed, "-"); ok {
+			labels["slug"] = normalizeLeaseSlug(head)
+		}
 	}
-	if vpcID == "" || subnetID == "" {
-		return "", "", exit(3, "tencent.vpcId and tencent.subnetId must be configured together")
-	}
-	return vpcID, subnetID, nil
+	return labels
 }
 
-func tencentInstanceTypeCandidatesForClass(class string) []string {
+func tencentBundleTypeCandidatesForClass(class string) []string {
 	switch class {
 	case "standard":
-		return []string{"S5.4XLARGE64", "S6.4XLARGE64"}
+		return []string{"XL"}
 	case "fast":
-		return []string{"S5.8XLARGE128", "S6.8XLARGE128"}
+		return []string{"24GB_A"}
 	case "large":
-		return []string{"S5.12XLARGE192"}
+		return []string{"3XL"}
 	case "beast":
-		return []string{"S5.16XLARGE256", "S6.16XLARGE256"}
+		return []string{"4XL"}
 	default:
 		return []string{class}
 	}
@@ -776,7 +505,10 @@ func tencentLaunchCandidates(cfg Config) []string {
 	if cfg.ServerTypeExplicit {
 		return []string{cfg.ServerType}
 	}
-	return appendUniqueStrings([]string{cfg.ServerType}, tencentInstanceTypeCandidatesForClass(cfg.Class)...)
+	if cfg.TencentBundleType != "" {
+		return appendUniqueStrings([]string{cfg.TencentBundleType}, tencentBundleTypeCandidatesForClass(cfg.Class)...)
+	}
+	return appendUniqueStrings([]string{cfg.ServerType}, tencentBundleTypeCandidatesForClass(cfg.Class)...)
 }
 
 func isRetryableTencentProvisioningError(err error) bool {
@@ -785,10 +517,7 @@ func isRetryableTencentProvisioningError(err error) bool {
 		return true
 	}
 	s := err.Error()
-	return strings.Contains(s, "ResourcesSoldOut") ||
-		strings.Contains(s, "ResourceInsufficient") ||
-		strings.Contains(s, "InsufficientOffering") ||
-		strings.Contains(s, "SoldOut")
+	return strings.Contains(s, "ResourcesSoldOut") || strings.Contains(s, "ResourceInsufficient") || strings.Contains(s, "InsufficientOffering") || strings.Contains(s, "SoldOut")
 }
 
 func isTencentInstanceNotFound(err error) bool {
@@ -796,27 +525,13 @@ func isTencentInstanceNotFound(err error) bool {
 		return false
 	}
 	code := tencentErrorCode(err)
-	return strings.Contains(code, "InvalidInstanceId.NotFound") || strings.Contains(code, "ResourceNotFound")
-}
-
-func isTencentKeyNotFound(err error) bool {
-	if err == nil {
-		return false
-	}
-	code := tencentErrorCode(err)
-	return strings.Contains(code, "KeyPairNotFound") ||
-		strings.Contains(code, "InvalidKeyPairId.NotFound") ||
-		strings.Contains(code, "InvalidKeyPair.NotFound") ||
-		strings.Contains(code, "ResourceNotFound")
+	return strings.Contains(code, "InvalidInstanceId.NotFound") || strings.Contains(code, "ResourceNotFound") || strings.Contains(code, "InvalidInstanceId")
 }
 
 func tencentErrorCode(err error) string {
-	if err == nil {
-		return ""
-	}
-	var sdkErr *tcerrors.TencentCloudSDKError
-	if errors.As(err, &sdkErr) {
-		return sdkErr.GetCode()
+	var apiErr tencentAPIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Code
 	}
 	return ""
 }
@@ -826,100 +541,108 @@ func isLocalNotFoundExit(err error) bool {
 	return AsExitError(err, &exitErr) && exitErr.Code == 4
 }
 
-func tencentCVMTags(labels map[string]string) []*tccvm.Tag {
-	keys := sortedLabelKeys(labels)
-	tags := make([]*tccvm.Tag, 0, len(keys))
-	for _, key := range keys {
-		tags = append(tags, &tccvm.Tag{Key: tccommon.StringPtr(key), Value: tccommon.StringPtr(labels[key])})
-	}
-	return tags
-}
-
-func tencentVPCTags(labels map[string]string) []*tcvpc.Tag {
-	keys := sortedLabelKeys(labels)
-	tags := make([]*tcvpc.Tag, 0, len(keys))
-	for _, key := range keys {
-		tags = append(tags, &tcvpc.Tag{Key: tccommon.StringPtr(key), Value: tccommon.StringPtr(labels[key])})
-	}
-	return tags
-}
-
-func tencentResourceTags(labels map[string]string) []*tctag.Tag {
-	keys := sortedLabelKeys(labels)
-	tags := make([]*tctag.Tag, 0, len(keys))
-	for _, key := range keys {
-		tags = append(tags, &tctag.Tag{TagKey: tccommon.StringPtr(key), TagValue: tccommon.StringPtr(labels[key])})
-	}
-	return tags
-}
-
-func sortedLabelKeys(labels map[string]string) []string {
-	keys := make([]string, 0, len(labels))
-	for key := range labels {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func tencentProviderKeyForLease(leaseID string) string {
-	return tencentKeyName("crabbox_" + leaseID)
-}
-
-func validTencentProviderKey(name string) bool {
-	return strings.HasPrefix(name, "crabbox_cbx_")
-}
-
-func tencentKeyName(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
-	}
-	var b strings.Builder
-	for _, r := range name {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
-			b.WriteRune(r)
-		} else if r == '-' {
-			b.WriteByte('_')
-		}
-		if b.Len() >= 25 {
-			break
-		}
-	}
-	out := strings.Trim(b.String(), "_")
-	if out == "" {
-		return "crabbox_key"
-	}
-	return out
-}
-
-func tencentHourlyPriceFromResponse(resp *tccvm.InquiryPriceRunInstancesResponse) float64 {
-	if resp == nil || resp.Response == nil || resp.Response.Price == nil || resp.Response.Price.InstancePrice == nil {
-		return 0
-	}
-	price := resp.Response.Price.InstancePrice
-	if price.UnitPriceDiscount != nil && *price.UnitPriceDiscount > 0 {
-		return *price.UnitPriceDiscount
-	}
-	if price.UnitPrice != nil && *price.UnitPrice > 0 {
-		return *price.UnitPrice
-	}
-	return 0
-}
-
-func tencentStaticHourlyPriceUSD(instanceType string) float64 {
-	switch instanceType {
-	case "S5.4XLARGE64", "S6.4XLARGE64":
-		return 1.60
-	case "S5.8XLARGE128", "S6.8XLARGE128":
-		return 3.20
-	case "S5.12XLARGE192":
-		return 4.80
-	case "S5.16XLARGE256", "S6.16XLARGE256":
-		return 6.40
+func tencentStaticHourlyPriceUSD(bundleType string) float64 {
+	switch bundleType {
+	case "XL":
+		return 1.00
+	case "24GB_A":
+		return 1.50
+	case "3XL":
+		return 3.00
+	case "4XL":
+		return 6.00
 	default:
 		return 0
 	}
+}
+
+func validTencentProviderKey(name string) bool { return false }
+
+func tencentSHA256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func hmacSHA256(key []byte, data string) []byte {
+	h := hmac.New(sha256.New, key)
+	h.Write([]byte(data))
+	return h.Sum(nil)
+}
+
+type tencentAPIError struct{ Code, Message string }
+
+func (e tencentAPIError) Error() string {
+	if e.Message == "" {
+		return e.Code
+	}
+	return e.Code + ": " + e.Message
+}
+
+type haiSystemDisk struct {
+	DiskType string `json:"DiskType,omitempty"`
+	DiskSize int64  `json:"DiskSize,omitempty"`
+}
+
+type haiRunInstancesRequest struct {
+	ApplicationID string         `json:"ApplicationId,omitempty"`
+	BundleType    string         `json:"BundleType,omitempty"`
+	SystemDisk    *haiSystemDisk `json:"SystemDisk,omitempty"`
+	InstanceCount int            `json:"InstanceCount,omitempty"`
+	InstanceName  string         `json:"InstanceName,omitempty"`
+	ClientToken   string         `json:"ClientToken,omitempty"`
+}
+
+type haiRunInstancesResponse struct {
+	Response struct {
+		InstanceIDSet []string `json:"InstanceIdSet"`
+		RequestID     string   `json:"RequestId"`
+	} `json:"Response"`
+}
+
+type haiDescribeInstancesResponse struct {
+	Response struct {
+		TotalCount  int           `json:"TotalCount"`
+		InstanceSet []haiInstance `json:"InstanceSet"`
+		RequestID   string        `json:"RequestId"`
+	} `json:"Response"`
+}
+
+type haiInstance struct {
+	InstanceID         string   `json:"InstanceId"`
+	InstanceName       string   `json:"InstanceName"`
+	InstanceState      string   `json:"InstanceState"`
+	ApplicationName    string   `json:"ApplicationName"`
+	BundleName         string   `json:"BundleName"`
+	PrivateIPAddresses []string `json:"PrivateIpAddresses"`
+	PublicIPAddresses  []string `json:"PublicIpAddresses"`
+}
+
+type haiInquirePriceRunInstancesResponse struct {
+	Response struct {
+		Price struct {
+			InstancePrice struct {
+				UnitPrice         float64 `json:"UnitPrice"`
+				UnitPriceDiscount float64 `json:"UnitPriceDiscount"`
+			} `json:"InstancePrice"`
+		} `json:"Price"`
+		RequestID string `json:"RequestId"`
+	} `json:"Response"`
+}
+
+type haiRequestIDResponse struct {
+	Response struct {
+		RequestID string `json:"RequestId"`
+	} `json:"Response"`
+}
+
+type haiErrorEnvelope struct {
+	Response struct {
+		Error *struct {
+			Code    string `json:"Code"`
+			Message string `json:"Message"`
+		} `json:"Error"`
+		RequestID string `json:"RequestId"`
+	} `json:"Response"`
 }
 
 func tcString(value *string) string {

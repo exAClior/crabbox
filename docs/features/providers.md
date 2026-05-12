@@ -29,7 +29,7 @@ Direct provider backends can also run without the Crabbox coordinator:
 
 ```text
 proxmox    Proxmox VE QEMU VM clones exposed as SSH leases
-tencent    Tencent Cloud CVM instances exposed as SSH leases
+tencent    Tencent Cloud HAI instances exposed as SSH leases
 semaphore  Semaphore CI jobs exposed as SSH leases
 namespace  Namespace Devboxes exposed as SSH leases
 sprites    Sprites microVMs exposed as SSH leases through sprite proxy
@@ -127,11 +127,11 @@ fast      c4-standard-64, c3-standard-44, n2-standard-64, n2d-standard-64, c4-st
 large     c4-standard-96, c3-standard-88, n2-standard-80, n2d-standard-96, c4-standard-64
 beast     c4-standard-192, c4-standard-96, c3-standard-176, c3-standard-88, n2d-standard-224, n2-standard-128
 
-Tencent Cloud
-standard  S5.4XLARGE64, S6.4XLARGE64
-fast      S5.8XLARGE128, S6.8XLARGE128
-large     S5.12XLARGE192
-beast     S5.16XLARGE256, S6.16XLARGE256
+Tencent Cloud HAI
+standard  XL      GPU base; 16GB+ VRAM, 8+ TFLOPS FP32, 8 vCPU, 32GiB RAM
+fast      24GB_A  GPU advanced; 24GB+ VRAM, 30+ TFLOPS FP32, 28 vCPU, 116GiB RAM
+large     3XL     GPU advanced/high; 32GB+ VRAM class
+beast     4XL     GPU high; 48GB+ VRAM, 59+ TFLOPS FP32, 48 vCPU, 192GiB RAM
 
 Namespace Devbox
 standard  S

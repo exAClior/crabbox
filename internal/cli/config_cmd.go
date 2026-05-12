@@ -142,14 +142,12 @@ func (a App) configShow(args []string) error {
 			"serviceAccount": cfg.GCPServiceAccount,
 		},
 		"tencent": map[string]any{
-			"secretId":  tokenState(cfg.TencentSecretID),
-			"secretKey": tokenState(cfg.TencentSecretKey),
-			"region":    cfg.TencentRegion,
-			"zone":      cfg.TencentZone,
-			"imageId":   cfg.TencentImageID,
-			"vpcId":     cfg.TencentVpcID,
-			"subnetId":  cfg.TencentSubnetID,
-			"rootGB":    cfg.TencentRootGB,
+			"secretId":      tokenState(cfg.TencentSecretID),
+			"secretKey":     tokenState(cfg.TencentSecretKey),
+			"region":        cfg.TencentRegion,
+			"applicationId": cfg.TencentApplicationID,
+			"bundleType":    tencentConfigBundleType(cfg),
+			"systemDiskGB":  cfg.TencentSystemDiskGB,
 		},
 		"proxmox": map[string]any{
 			"apiUrl":      cfg.Proxmox.APIURL,
@@ -194,9 +192,19 @@ func (a App) configShow(args []string) error {
 	}
 	fmt.Fprintf(a.Stdout, "aws region=%s root_gb=%d ssh_cidrs=%s\n", cfg.AWSRegion, cfg.AWSRootGB, blank(strings.Join(cfg.AWSSSHCIDRs, ","), "-"))
 	fmt.Fprintf(a.Stdout, "gcp project=%s zone=%s image=%s network=%s subnet=%s root_gb=%d ssh_cidrs=%s\n", blank(cfg.GCPProject, "-"), cfg.GCPZone, cfg.GCPImage, cfg.GCPNetwork, blank(cfg.GCPSubnet, "-"), cfg.GCPRootGB, blank(strings.Join(cfg.GCPSSHCIDRs, ","), "-"))
-	fmt.Fprintf(a.Stdout, "tencent region=%s zone=%s image=%s vpc=%s subnet=%s root_gb=%d auth=%s/%s\n", blank(cfg.TencentRegion, "-"), blank(cfg.TencentZone, "-"), blank(cfg.TencentImageID, "-"), blank(cfg.TencentVpcID, "DEFAULT"), blank(cfg.TencentSubnetID, "DEFAULT"), cfg.TencentRootGB, tokenState(cfg.TencentSecretID), tokenState(cfg.TencentSecretKey))
+	fmt.Fprintf(a.Stdout, "tencent mode=hai region=%s application_id=%s bundle=%s system_disk_gb=%d auth=%s/%s\n", blank(cfg.TencentRegion, "-"), blank(cfg.TencentApplicationID, "-"), blank(tencentConfigBundleType(cfg), "-"), cfg.TencentSystemDiskGB, tokenState(cfg.TencentSecretID), tokenState(cfg.TencentSecretKey))
 	fmt.Fprintf(a.Stdout, "proxmox api_url=%s node=%s template_id=%d storage=%s pool=%s bridge=%s user=%s work_root=%s full_clone=%t auth=%s\n", blank(cfg.Proxmox.APIURL, "-"), blank(cfg.Proxmox.Node, "-"), cfg.Proxmox.TemplateID, blank(cfg.Proxmox.Storage, "-"), blank(cfg.Proxmox.Pool, "-"), blank(cfg.Proxmox.Bridge, "-"), cfg.Proxmox.User, cfg.Proxmox.WorkRoot, cfg.Proxmox.FullClone, tokenState(cfg.Proxmox.TokenSecret))
 	return nil
+}
+
+func tencentConfigBundleType(cfg Config) string {
+	if cfg.Provider == "tencent" && cfg.ServerType != "" {
+		return cfg.ServerType
+	}
+	if cfg.TencentBundleType != "" {
+		return cfg.TencentBundleType
+	}
+	return tencentBundleTypeCandidatesForClass(cfg.Class)[0]
 }
 
 func jobConfigViews(jobs map[string]JobConfig) map[string]any {
