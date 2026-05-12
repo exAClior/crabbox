@@ -1,7 +1,7 @@
 BINARY := crabbox
 CMD := ./cmd/crabbox
 BIN_DIR := bin
-LOCAL_BIN ?= $(HOME)/local/bin
+LOCAL_BIN ?= $(HOME)/.local/bin
 GO ?= go
 GOFLAGS ?= -trimpath
 

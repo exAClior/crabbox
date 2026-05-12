@@ -1,5 +1,15 @@
 # Repository Guidelines
 
+## Current Focus
+
+The repo's active task is tracked in [`TASK.md`](TASK.md), with detailed
+workstream notes in [`plans/`](plans/README.md). `TASK.md` is the
+progressive-disclosure entry point: a one-screen summary plus a capability
+matrix and links to each focused plan. Read it before starting non-trivial
+work, align changes with the goal/scope/non-goals, and update the status
+table in `TASK.md` as plans move from `draft` to `in-progress` to `done`. If
+your work falls outside that scope, say so explicitly in the PR description.
+
 ## Project Structure & Module Organization
 
 Crabbox is a Go CLI plus a Cloudflare Worker coordinator. The CLI entrypoint is `cmd/crabbox`, with implementation and Go tests in `internal/cli`. Worker source lives in `worker/src`, with Vitest tests in `worker/test`. Documentation lives in `docs/`; command docs are under `docs/commands`, and feature notes under `docs/features`. Release configuration is in `.goreleaser.yaml`; GitHub Actions live in `.github/workflows`. Generated outputs such as `bin/`, `dist/`, `worker/dist/`, and `worker/node_modules/` should not be edited by hand.

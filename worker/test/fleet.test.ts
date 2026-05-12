@@ -2116,6 +2116,44 @@ describe("fleet lease identity and idle", () => {
     );
   });
 
+  it("dispatches Tencent image creation through the lease provider", async () => {
+    const storage = new MemoryStorage();
+    const fleet = testFleet(storage, {
+      aws: failingProvider("aws image path should not be used"),
+      tencent: fakeProvider(undefined, { provider: "tencent" }),
+    });
+    storage.seed(
+      "lease:cbx_000000000001",
+      testLease({
+        id: "cbx_000000000001",
+        provider: "tencent",
+        cloudID: "ins-123",
+        region: "ap-singapore",
+      }),
+    );
+
+    const created = await fleet.fetch(
+      request("POST", "/v1/images", {
+        headers: { "x-crabbox-admin": "true" },
+        body: { leaseID: "cbx_000000000001", name: "crabbox-tencent-test" },
+      }),
+    );
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({
+      image: { id: "img-000000000001", state: "pending", region: "ap-singapore" },
+    });
+
+    const fetched = await fleet.fetch(
+      request("GET", "/v1/images/img-000000000001?provider=tencent", {
+        headers: { "x-crabbox-admin": "true" },
+      }),
+    );
+    expect(fetched.status).toBe(200);
+    await expect(fetched.json()).resolves.toMatchObject({
+      image: { id: "img-000000000001", state: "available" },
+    });
+  });
+
   it("mints broker-owned artifact upload URLs without exposing secrets", async () => {
     const fleet = testFleet(
       new MemoryStorage(),
@@ -3129,6 +3167,14 @@ describe("fleet identity", () => {
         "AZURE_SUBSCRIPTION_ID",
       ],
     });
+
+    const tencent = await fleet.fetch(request("GET", "/v1/providers/tencent/readiness"));
+    expect(tencent.status).toBe(200);
+    await expect(tencent.json()).resolves.toMatchObject({
+      provider: "tencent",
+      configured: false,
+      missing: ["TENCENT_SECRET_ID", "TENCENT_SECRET_KEY"],
+    });
   });
 
   it("fails brokered Azure leases with provider_not_configured before constructing Azure", async () => {
@@ -3247,7 +3293,7 @@ function testFleet(
 function fakeProvider(
   onCreate?: (config: LeaseConfig) => void,
   result: {
-    provider?: "hetzner" | "aws" | "gcp";
+    provider?: "hetzner" | "aws" | "gcp" | "tencent";
     serverType?: string;
     cloudID?: string;
     market?: string;
@@ -3274,7 +3320,9 @@ function fakeProvider(
               ? "eu-west-2"
               : result.provider === "gcp"
                 ? "us-central1-a"
-                : undefined,
+                : result.provider === "tencent"
+                  ? "ap-singapore"
+                  : undefined,
           labels: {},
         },
         serverType: result.serverType ?? "cpx62",
@@ -3284,19 +3332,47 @@ function fakeProvider(
     },
     async deleteServer() {},
     async createImage(_instanceID: string, name: string) {
-      return { id: "ami-000000000001", name, state: "pending", region: "eu-west-1" };
+      return result.provider === "tencent"
+        ? { id: "img-000000000001", name, state: "pending", region: "ap-singapore" }
+        : { id: "ami-000000000001", name, state: "pending", region: "eu-west-1" };
     },
     async getImage(imageID: string) {
       return {
         id: imageID,
         name: "openclaw-crabbox-test",
         state: "available",
-        region: "eu-west-1",
+        region: imageID.startsWith("img-") ? "ap-singapore" : "eu-west-1",
       };
     },
     async deleteSSHKey() {},
     async hourlyPriceUSD() {
       return 0.1;
+    },
+  };
+}
+
+function failingProvider(message: string) {
+  return {
+    async listCrabboxServers() {
+      throw new Error(message);
+    },
+    async createServerWithFallback() {
+      throw new Error(message);
+    },
+    async deleteServer() {
+      throw new Error(message);
+    },
+    async createImage() {
+      throw new Error(message);
+    },
+    async getImage() {
+      throw new Error(message);
+    },
+    async deleteSSHKey() {
+      throw new Error(message);
+    },
+    async hourlyPriceUSD() {
+      throw new Error(message);
     },
   };
 }

@@ -38,6 +38,17 @@ export interface LeaseConfig {
   gcpSSHCIDRs: string[];
   gcpRootGB: number;
   gcpServiceAccount: string;
+  tencentRegion: string;
+  tencentZone: string;
+  tencentImage: string;
+  tencentVPCID: string;
+  tencentSubnetID: string;
+  tencentSecurityGroupID: string;
+  tencentSSHCIDRs: string[];
+  tencentSystemDiskGB: number;
+  tencentSystemDiskType: string;
+  tencentInternetMaxBandwidthOutMbps: number | undefined;
+  tencentInstanceChargeType: "POSTPAID_BY_HOUR" | "SPOTPAID";
   capacityMarket: "spot" | "on-demand";
   capacityStrategy:
     | "most-available"
@@ -61,18 +72,33 @@ export interface LeaseConfig {
 
 export function leaseConfig(input: LeaseRequest): LeaseConfig {
   const provider = input.provider ?? "hetzner";
-  if (provider !== "hetzner" && provider !== "aws" && provider !== "azure" && provider !== "gcp") {
+  if (
+    provider !== "hetzner" &&
+    provider !== "aws" &&
+    provider !== "azure" &&
+    provider !== "gcp" &&
+    provider !== "tencent"
+  ) {
     throw new Error(`unsupported provider: ${String(provider)}`);
   }
   const target = normalizeTarget(input.target ?? input.targetOS ?? "linux");
   const windowsMode = normalizeWindowsMode(input.windowsMode ?? "normal");
+  if (provider === "tencent" && target === "macos") {
+    throw new Error("tencent target=macos is not supported");
+  }
   if (
     target !== "linux" &&
     !(provider === "aws" && target === "windows") &&
     !(provider === "aws" && target === "macos") &&
-    !(provider === "azure" && target === "windows" && windowsMode === "normal")
+    !(provider === "azure" && target === "windows" && windowsMode === "normal") &&
+    !(provider === "tencent" && target === "windows" && windowsMode === "normal")
   ) {
-    if (provider === "hetzner" || provider === "azure" || provider === "gcp") {
+    if (
+      provider === "hetzner" ||
+      provider === "azure" ||
+      provider === "gcp" ||
+      provider === "tencent"
+    ) {
       throw new Error(unsupportedManagedTargetMessage(provider, target, windowsMode));
     }
     throw new Error(`unsupported target for brokered ${provider}: ${target}`);
@@ -97,6 +123,7 @@ export function leaseConfig(input: LeaseRequest): LeaseConfig {
   const machineClass = input.class ?? "beast";
   const serverType =
     input.serverType ?? serverTypeForConfig(provider, target, windowsMode, machineClass);
+  const capacityMarket = input.capacity?.market ?? (provider === "tencent" ? "on-demand" : "spot");
   const ttlSeconds = clampTTL(input.ttlSeconds ?? 5400);
   const idleTimeoutSeconds = clampIdleTimeout(input.idleTimeoutSeconds ?? 1800);
   const sshPublicKey = input.sshPublicKey?.trim() ?? "";
@@ -147,7 +174,18 @@ export function leaseConfig(input: LeaseRequest): LeaseConfig {
     gcpSSHCIDRs: validCIDRs(input.gcpSSHCIDRs ?? []),
     gcpRootGB: input.gcpRootGB ?? 0,
     gcpServiceAccount: input.gcpServiceAccount ?? "",
-    capacityMarket: input.capacity?.market ?? "spot",
+    tencentRegion: input.tencentRegion ?? "",
+    tencentZone: input.tencentZone ?? "",
+    tencentImage: input.tencentImage ?? "",
+    tencentVPCID: input.tencentVPCID ?? "",
+    tencentSubnetID: input.tencentSubnetID ?? "",
+    tencentSecurityGroupID: input.tencentSecurityGroupID ?? "",
+    tencentSSHCIDRs: validCIDRs(input.tencentSSHCIDRs ?? []),
+    tencentSystemDiskGB: input.tencentSystemDiskGB ?? 0,
+    tencentSystemDiskType: input.tencentSystemDiskType ?? "",
+    tencentInternetMaxBandwidthOutMbps: input.tencentInternetMaxBandwidthOutMbps,
+    tencentInstanceChargeType: input.tencentInstanceChargeType ?? "POSTPAID_BY_HOUR",
+    capacityMarket,
     capacityStrategy: input.capacity?.strategy ?? "most-available",
     capacityFallback: input.capacity?.fallback ?? "on-demand-after-120s",
     capacityRegions: input.capacity?.regions ?? [],
@@ -204,6 +242,12 @@ function unsupportedManagedTargetMessage(
       return "brokered gcp managed provisioning supports target=linux only; use brokered aws with an EC2 Mac Dedicated Host or provider=ssh for existing macOS hosts";
     }
     return "brokered gcp managed provisioning supports target=linux only";
+  }
+  if (provider === "tencent") {
+    if (target === "windows" && windowsMode === "wsl2") {
+      return "brokered tencent supports native Windows only; use brokered aws for managed Windows WSL2 or provider=ssh for existing Windows WSL2 hosts";
+    }
+    return "tencent target=macos is not supported";
   }
   if (target === "windows") {
     return `brokered ${provider} managed provisioning supports target=linux only; use brokered aws for managed Windows or provider=ssh for existing Windows hosts`;
@@ -289,6 +333,24 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
 
+function splitCommaList(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function positiveIntString(value: string | undefined): number {
+  if (!value) {
+    return 0;
+  }
+  return positiveIntNumber(Number.parseInt(value, 10));
+}
+
+function positiveIntNumber(value: number | undefined): number {
+  return value !== undefined && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+}
+
 export function serverTypeForClass(machineClass: string): string {
   return serverTypeCandidatesForClass(machineClass)[0] ?? machineClass;
 }
@@ -302,6 +364,9 @@ export function serverTypeForProviderClass(provider: Provider, machineClass: str
   }
   if (provider === "gcp") {
     return gcpMachineTypeCandidatesForClass(machineClass)[0] ?? machineClass;
+  }
+  if (provider === "tencent") {
+    return tencentInstanceTypeCandidatesForTargetClass("linux", machineClass)[0] ?? machineClass;
   }
   return serverTypeForClass(machineClass);
 }
@@ -325,7 +390,106 @@ export function serverTypeForConfig(
   if (provider === "gcp") {
     return gcpMachineTypeCandidatesForClass(machineClass)[0] ?? machineClass;
   }
+  if (provider === "tencent") {
+    return (
+      tencentInstanceTypeCandidatesForTargetClass(target, machineClass, windowsMode)[0] ??
+      machineClass
+    );
+  }
   return serverTypeForClass(machineClass);
+}
+
+export function tencentInstanceTypeCandidatesForTargetClass(
+  target: TargetOS,
+  machineClass: string,
+  windowsMode: WindowsMode = "normal",
+): string[] {
+  if (target === "windows" && windowsMode !== "normal") {
+    return [machineClass];
+  }
+  return tencentInstanceTypeCandidatesForClass(machineClass);
+}
+
+export function tencentInstanceTypeCandidatesForClass(machineClass: string): string[] {
+  switch (machineClass) {
+    case "standard":
+      return ["S5.MEDIUM4", "SA3.MEDIUM4", "S6.MEDIUM4", "S5.SMALL2"];
+    case "fast":
+      return ["S5.LARGE8", "SA3.LARGE8", "S6.LARGE8", "S5.MEDIUM4"];
+    case "large":
+      return ["S5.2XLARGE16", "SA3.2XLARGE16", "S6.2XLARGE16", "S5.LARGE16"];
+    case "beast":
+      return ["S5.LARGE16", "SA3.LARGE16", "S6.LARGE16", "S5.2XLARGE16"];
+    default:
+      return [machineClass];
+  }
+}
+
+export function tencentRegionCandidatesForTargetClass(machineClass: string): string[] {
+  switch (machineClass) {
+    case "standard":
+      return ["ap-singapore", "ap-hongkong", "ap-jakarta", "ap-tokyo"];
+    case "fast":
+      return ["ap-singapore", "ap-hongkong", "ap-tokyo", "ap-jakarta"];
+    case "large":
+    case "beast":
+      return ["ap-singapore", "ap-hongkong", "ap-tokyo", "na-siliconvalley"];
+    default:
+      return ["ap-singapore", "ap-hongkong", "ap-tokyo"];
+  }
+}
+
+export function tencentRegionCandidates(
+  config: Pick<LeaseConfig, "tencentRegion" | "capacityRegions" | "class">,
+  env: Pick<EnvLike, "CRABBOX_TENCENT_REGION" | "CRABBOX_CAPACITY_REGIONS">,
+  preferredRegion = "ap-singapore",
+): string[] {
+  return uniqueStrings([
+    preferredRegion,
+    config.tencentRegion,
+    env.CRABBOX_TENCENT_REGION ?? "",
+    ...splitCommaList(env.CRABBOX_CAPACITY_REGIONS ?? ""),
+    ...config.capacityRegions,
+    ...tencentRegionCandidatesForTargetClass(config.class),
+  ]);
+}
+
+export function tencentSystemDiskTypeFor(override = "", envOverride = ""): string {
+  const value = (override || envOverride || "CLOUD_PREMIUM").trim().toUpperCase();
+  return /^[A-Z_]{3,32}$/.test(value) ? value : "CLOUD_PREMIUM";
+}
+
+export function tencentSystemDiskGB(
+  config: { tencentSystemDiskGB?: number | undefined },
+  env: Pick<EnvLike, "CRABBOX_TENCENT_SYSTEM_DISK_GB">,
+): number {
+  return (
+    positiveIntString(env.CRABBOX_TENCENT_SYSTEM_DISK_GB) ||
+    positiveIntNumber(config.tencentSystemDiskGB) ||
+    80
+  );
+}
+
+export function tencentInternetMaxBandwidthOutMbps(
+  config: { tencentInternetMaxBandwidthOutMbps?: number | undefined },
+  env: Pick<EnvLike, "CRABBOX_TENCENT_INTERNET_BANDWIDTH_MBPS">,
+): number {
+  if (config.tencentInternetMaxBandwidthOutMbps !== undefined) {
+    return Math.trunc(config.tencentInternetMaxBandwidthOutMbps);
+  }
+  const envValue = env.CRABBOX_TENCENT_INTERNET_BANDWIDTH_MBPS?.trim();
+  if (envValue) {
+    const parsed = Number.parseInt(envValue, 10);
+    return Number.isFinite(parsed) ? Math.trunc(parsed) : 5;
+  }
+  return 5;
+}
+
+interface EnvLike {
+  CRABBOX_TENCENT_REGION?: string;
+  CRABBOX_TENCENT_SYSTEM_DISK_GB?: string;
+  CRABBOX_TENCENT_INTERNET_BANDWIDTH_MBPS?: string;
+  CRABBOX_CAPACITY_REGIONS?: string;
 }
 
 export function gcpMachineTypeCandidatesForClass(machineClass: string): string[] {

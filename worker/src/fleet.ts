@@ -7,7 +7,7 @@ import {
   isRetryableAWSProvisioningError,
 } from "./aws";
 import { AzureClient } from "./azure";
-import { azureLocationFor, leaseConfig, validCIDRs } from "./config";
+import { azureLocationFor, leaseConfig, tencentRegionCandidates, validCIDRs } from "./config";
 import { GCPClient } from "./gcp";
 import { HetznerClient } from "./hetzner";
 import { errorMessage, json, pathParts, readJson, requestOwner } from "./http";
@@ -31,6 +31,12 @@ import {
   tailscaleDefaultTags,
   validateTailscaleTags,
 } from "./tailscale";
+import {
+  TencentCVMClient,
+  isRetryableTencentProvisioningError,
+  tencentProvisioningErrorCategory,
+  validTencentProviderKey,
+} from "./tencent";
 import type {
   CapacityHint,
   Env,
@@ -816,6 +822,12 @@ export class FleetDurableObject implements DurableObject {
     if (config.provider === "aws" && config.awsSSHCIDRs.length === 0) {
       config.awsSSHCIDRs = requestSourceCIDRs(request);
     }
+    if (config.provider === "tencent" && !config.tencentRegion) {
+      config.tencentRegion = this.env.CRABBOX_TENCENT_REGION || "ap-singapore";
+    }
+    if (config.provider === "tencent" && config.tencentSSHCIDRs.length === 0) {
+      config.tencentSSHCIDRs = requestSourceCIDRs(request);
+    }
     if (config.provider === "aws" && !config.awsAMI) {
       config.awsAMI = (await this.promotedAWSImage())?.id ?? "";
     }
@@ -856,7 +868,7 @@ export class FleetDurableObject implements DurableObject {
     }
     const provider = this.provider(
       config.provider,
-      config.provider === "gcp" ? config.gcpZone : config.awsRegion,
+      providerRegionForConfig(config),
       config.provider === "gcp" ? config.gcpProject : undefined,
     );
     const providerHourlyUSD = await provider
@@ -942,6 +954,9 @@ export class FleetDurableObject implements DurableObject {
     if (config.provider === "aws" && server.region) {
       config.awsRegion = server.region;
     }
+    if (config.provider === "tencent" && server.region) {
+      config.tencentRegion = server.region;
+    }
     if (attempts && attempts.length > 0) {
       record.provisioningAttempts = attempts;
     }
@@ -973,6 +988,9 @@ export class FleetDurableObject implements DurableObject {
     if (config.provider === "gcp") {
       record.region = server.region ?? config.gcpZone;
       record.providerProject = config.gcpProject;
+    }
+    if (config.provider === "tencent") {
+      record.region = server.region ?? config.tencentRegion;
     }
     await this.putLease(record);
     await this.scheduleAlarm();
@@ -2497,12 +2515,15 @@ export class FleetDurableObject implements DurableObject {
             ? await this.provider("azure").listCrabboxServers()
             : provider === "gcp"
               ? await this.provider("gcp").listCrabboxServers()
-              : [
-                  ...(await this.provider("hetzner").listCrabboxServers()),
-                  ...(await this.listProviderMachinesSafe("aws")),
-                  ...(await this.listProviderMachinesSafe("azure")),
-                  ...(await this.listProviderMachinesSafe("gcp")),
-                ];
+              : provider === "tencent"
+                ? await this.provider("tencent").listCrabboxServers()
+                : [
+                    ...(await this.provider("hetzner").listCrabboxServers()),
+                    ...(await this.listProviderMachinesSafe("aws")),
+                    ...(await this.listProviderMachinesSafe("azure")),
+                    ...(await this.listProviderMachinesSafe("gcp")),
+                    ...(await this.listProviderMachinesSafe("tencent")),
+                  ];
     return json({ machines });
   }
 
@@ -2925,13 +2946,13 @@ export class FleetDurableObject implements DurableObject {
     if (!lease) {
       return notFound();
     }
-    if (lease.provider !== "aws" || !lease.cloudID) {
+    if ((lease.provider !== "aws" && lease.provider !== "tencent") || !lease.cloudID) {
       return json(
-        { error: "unsupported_provider", message: "only AWS leases can be imaged" },
+        { error: "unsupported_provider", message: "only AWS and Tencent leases can be imaged" },
         { status: 400 },
       );
     }
-    const image = await this.provider("aws", lease.region).createImage(
+    const image = await this.provider(lease.provider, lease.region).createImage(
       lease.cloudID,
       name,
       input.noReboot ?? true,
@@ -2945,11 +2966,14 @@ export class FleetDurableObject implements DurableObject {
       return json({ error: "invalid_image_id" }, { status: 400 });
     }
     if (method === "GET" && action === undefined) {
-      const image = await this.provider("aws").getImage(imageID);
+      const provider = imageProviderFromRequest(request, imageID);
+      const image = await this.provider(provider).getImage(imageID);
       return json({ image });
     }
     if (method === "POST" && action === "promote") {
-      const image = await this.provider("aws").getImage(imageID);
+      const input = await optionalJson<{ provider?: Provider }>(request);
+      const provider = imageProviderFromRequest(request, imageID, input.provider);
+      const image = await this.provider(provider).getImage(imageID);
       if (image.state !== "available") {
         return json(
           { error: "image_not_available", message: `image ${imageID} is ${image.state}` },
@@ -2957,7 +2981,7 @@ export class FleetDurableObject implements DurableObject {
         );
       }
       const promoted: PromotedImageRecord = { ...image, promotedAt: new Date().toISOString() };
-      await this.state.storage.put(promotedAWSImageKey(), promoted);
+      await this.state.storage.put(promotedImageKey(provider), promoted);
       return json({ image: promoted });
     }
     return json({ error: "not_found" }, { status: 404 });
@@ -3240,6 +3264,12 @@ export class FleetDurableObject implements DurableObject {
     if (provider === "gcp") {
       return new GCPProvider(this.env, region, project);
     }
+    if (provider === "tencent") {
+      return new TencentProvider(
+        this.env,
+        region || this.env.CRABBOX_TENCENT_REGION || "ap-singapore",
+      );
+    }
     return new HetznerProvider(this.env);
   }
 
@@ -3257,6 +3287,13 @@ export class FleetDurableObject implements DurableObject {
     }
     if (lease.provider === "gcp") {
       await this.provider("gcp", lease.region, lease.providerProject).deleteServer(lease.cloudID);
+      return;
+    }
+    if (lease.provider === "tencent") {
+      await this.provider("tencent", lease.region).deleteServer(lease.cloudID);
+      if (validTencentProviderKey(lease.providerKey)) {
+        await this.provider("tencent", lease.region).deleteSSHKey(lease.providerKey);
+      }
       return;
     }
     await this.provider("hetzner").deleteServer(String(lease.serverID));
@@ -3283,6 +3320,20 @@ export class FleetDurableObject implements DurableObject {
     }
     await this.putLease(lease);
     return lease;
+  }
+}
+
+function providerRegionForConfig(config: ReturnType<typeof leaseConfig>): string | undefined {
+  switch (config.provider) {
+    case "aws":
+      return config.awsRegion;
+    case "gcp":
+      return config.gcpZone;
+    case "tencent":
+      return config.tencentRegion;
+    case "azure":
+    case "hetzner":
+      return undefined;
   }
 }
 
@@ -3333,13 +3384,21 @@ function providerRequiredSecrets(provider: Provider): Array<keyof Env> {
       return ["AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_SUBSCRIPTION_ID"];
     case "gcp":
       return ["GCP_CLIENT_EMAIL", "GCP_PRIVATE_KEY"];
+    case "tencent":
+      return ["TENCENT_SECRET_ID", "TENCENT_SECRET_KEY"];
     case "hetzner":
       return ["HETZNER_TOKEN"];
   }
 }
 
 function isManagedProvider(provider: string): provider is Provider {
-  return provider === "aws" || provider === "azure" || provider === "gcp" || provider === "hetzner";
+  return (
+    provider === "aws" ||
+    provider === "azure" ||
+    provider === "gcp" ||
+    provider === "hetzner" ||
+    provider === "tencent"
+  );
 }
 
 function leaseKey(leaseID: string): string {
@@ -3379,7 +3438,11 @@ function runEventKey(runID: string, seq: number): string {
 }
 
 function promotedAWSImageKey(): string {
-  return "image:aws:promoted";
+  return promotedImageKey("aws");
+}
+
+function promotedImageKey(provider: "aws" | "tencent"): string {
+  return `image:${provider}:promoted`;
 }
 
 function webVNCTicketPrefix(): string {
@@ -3511,7 +3574,23 @@ function validEgressSessionID(value: string | undefined): value is string {
 }
 
 function validImageID(value: string | undefined): value is string {
-  return typeof value === "string" && /^ami-[a-f0-9]{8,32}$/.test(value);
+  return (
+    typeof value === "string" &&
+    (/^ami-[a-f0-9]{8,32}$/.test(value) || /^img-[A-Za-z0-9]{6,64}$/.test(value))
+  );
+}
+
+function imageProviderFromRequest(
+  request: Request,
+  imageID: string,
+  bodyProvider?: Provider,
+): "aws" | "tencent" {
+  const queryProvider = new URL(request.url).searchParams.get("provider") ?? "";
+  const provider = bodyProvider || (isManagedProvider(queryProvider) ? queryProvider : undefined);
+  if (provider === "aws" || provider === "tencent") {
+    return provider;
+  }
+  return imageID.startsWith("img-") ? "tencent" : "aws";
 }
 
 function validImageName(value: string): boolean {
@@ -4137,7 +4216,8 @@ function boundedRunEvent(
     input.provider === "aws" ||
     input.provider === "hetzner" ||
     input.provider === "azure" ||
-    input.provider === "gcp"
+    input.provider === "gcp" ||
+    input.provider === "tencent"
   ) {
     event.provider = input.provider;
   }
@@ -4824,6 +4904,107 @@ class GCPProvider implements CloudProvider {
   }
 }
 
+class TencentProvider implements CloudProvider {
+  private readonly client: TencentCVMClient;
+  private readonly region: string;
+
+  constructor(
+    private readonly env: Env,
+    region: string,
+  ) {
+    this.region = region;
+    this.client = new TencentCVMClient(env, region);
+  }
+
+  listCrabboxServers(): Promise<ProviderMachine[]> {
+    return this.client.listCrabboxServers();
+  }
+
+  async createServerWithFallback(
+    config: ReturnType<typeof leaseConfig>,
+    leaseID: string,
+    slug: string,
+    owner: string,
+  ): Promise<{
+    server: ProviderMachine;
+    serverType: string;
+    market?: string;
+    attempts?: ProvisioningAttempt[];
+  }> {
+    const regions = tencentRegionCandidates(config, this.env, this.region);
+    const failures: string[] = [];
+    const regionAttempts: ProvisioningAttempt[] = [];
+    for (const region of regions) {
+      const client = region === this.region ? this.client : new TencentCVMClient(this.env, region);
+      try {
+        const regionConfig = { ...config, tencentRegion: region };
+        // oxlint-disable-next-line eslint/no-await-in-loop -- region fallback must preserve ordered Tencent capacity preference.
+        const { server, serverType, market, attempts } = await client.createServerWithFallback(
+          regionConfig,
+          leaseID,
+          slug,
+          owner,
+        );
+        config.tencentImage = regionConfig.tencentImage;
+        config.tencentRegion = region;
+        const result: {
+          server: ProviderMachine;
+          serverType: string;
+          market?: string;
+          attempts?: ProvisioningAttempt[];
+        } = { server: { ...server, region }, serverType };
+        if (market) {
+          result.market = market;
+        }
+        const allAttempts = [...regionAttempts, ...(attempts ?? [])];
+        if (allAttempts.length > 0) {
+          result.attempts = allAttempts;
+        }
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        regionAttempts.push({
+          region,
+          serverType: config.serverType,
+          market: config.capacityMarket,
+          category: tencentProvisioningErrorCategory(message) || "region",
+          message: `region ${region}: ${message}`,
+        });
+        failures.push(`${region}: ${message}`);
+        if (!isRetryableTencentRegionProvisioningError(message)) {
+          break;
+        }
+      }
+    }
+    throw new Error(failures.join("; "));
+  }
+
+  deleteServer(id: string): Promise<void> {
+    return this.client.deleteServer(id);
+  }
+
+  createImage(instanceID: string, name: string, noReboot: boolean): Promise<ProviderImage> {
+    return this.client.createImage(instanceID, name, noReboot);
+  }
+
+  getImage(imageID: string): Promise<ProviderImage> {
+    return this.client.getImage(imageID);
+  }
+
+  deleteSSHKey(name: string): Promise<void> {
+    return this.client.deleteSSHKey(name);
+  }
+
+  hourlyPriceUSD(
+    serverType: string,
+    config: ReturnType<typeof leaseConfig>,
+  ): Promise<number | undefined> {
+    const region = config.tencentRegion || this.region;
+    const client = region === this.region ? this.client : new TencentCVMClient(this.env, region);
+    return client.hourlyPriceUSD(serverType, config);
+  }
+}
+
 class AWSProvider implements CloudProvider {
   private readonly client: EC2SpotClient;
   private readonly region: string;
@@ -4928,6 +5109,16 @@ function isRetryableAWSRegionProvisioningError(message: string): boolean {
   return (
     isRetryableAWSProvisioningError(message) ||
     message.includes("quota ") ||
+    message.includes("capacity")
+  );
+}
+
+function isRetryableTencentRegionProvisioningError(message: string): boolean {
+  const category = tencentProvisioningErrorCategory(message);
+  return (
+    isRetryableTencentProvisioningError(message) ||
+    category === "quota" ||
+    message.toLowerCase().includes("quota") ||
     message.includes("capacity")
   );
 }

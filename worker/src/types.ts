@@ -39,6 +39,19 @@ export interface Env {
   CRABBOX_GCP_SSH_CIDRS?: string;
   CRABBOX_GCP_ROOT_GB?: string;
   CRABBOX_GCP_SERVICE_ACCOUNT?: string;
+  TENCENT_SECRET_ID?: string;
+  TENCENT_SECRET_KEY?: string;
+  CRABBOX_TENCENT_REGION?: string;
+  CRABBOX_TENCENT_ZONE?: string;
+  CRABBOX_TENCENT_IMAGE?: string;
+  CRABBOX_TENCENT_VPC_ID?: string;
+  CRABBOX_TENCENT_SUBNET_ID?: string;
+  CRABBOX_TENCENT_SECURITY_GROUP_ID?: string;
+  CRABBOX_TENCENT_SSH_CIDRS?: string;
+  CRABBOX_TENCENT_SYSTEM_DISK_GB?: string;
+  CRABBOX_TENCENT_SYSTEM_DISK_TYPE?: string;
+  CRABBOX_TENCENT_INTERNET_BANDWIDTH_MBPS?: string;
+  CRABBOX_TENCENT_CNY_USD_RATE?: string;
   CRABBOX_SHARED_TOKEN?: string;
   CRABBOX_SHARED_OWNER?: string;
   CRABBOX_ADMIN_TOKEN?: string;
@@ -120,6 +133,17 @@ export interface LeaseRequest {
   gcpSSHCIDRs?: string[];
   gcpRootGB?: number;
   gcpServiceAccount?: string;
+  tencentRegion?: string;
+  tencentZone?: string;
+  tencentImage?: string;
+  tencentVPCID?: string;
+  tencentSubnetID?: string;
+  tencentSecurityGroupID?: string;
+  tencentSSHCIDRs?: string[];
+  tencentSystemDiskGB?: number;
+  tencentSystemDiskType?: string;
+  tencentInternetMaxBandwidthOutMbps?: number;
+  tencentInstanceChargeType?: "POSTPAID_BY_HOUR" | "SPOTPAID";
   capacity?: {
     market?: "spot" | "on-demand";
     strategy?: "most-available" | "price-capacity-optimized" | "capacity-optimized" | "sequential";
@@ -139,7 +163,7 @@ export interface LeaseRequest {
   sshPublicKey?: string;
 }
 
-export type Provider = "hetzner" | "aws" | "azure" | "gcp";
+export type Provider = "hetzner" | "aws" | "azure" | "gcp" | "tencent";
 export type TargetOS = "linux" | "macos" | "windows";
 export type WindowsMode = "normal" | "wsl2";
 
