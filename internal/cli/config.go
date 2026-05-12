@@ -64,6 +64,14 @@ type Config struct {
 	GCPRootGB          int64
 	gcpRootGBExplicit  bool
 	GCPServiceAccount  string
+	TencentSecretID    string
+	TencentSecretKey   string
+	TencentRegion      string
+	TencentZone        string
+	TencentImageID     string
+	TencentVpcID       string
+	TencentSubnetID    string
+	TencentRootGB      int64
 	Proxmox            ProxmoxConfig
 	SSHUser            string
 	SSHKey             string
@@ -361,6 +369,9 @@ func baseConfig() Config {
 		GCPNetwork:         "default",
 		GCPTags:            []string{"crabbox-ssh"},
 		GCPRootGB:          400,
+		TencentRegion:      "ap-singapore",
+		TencentZone:        "ap-singapore-2",
+		TencentRootGB:      400,
 		SSHUser:            "crabbox",
 		SSHKey:             sshKey,
 		SSHPort:            "2222",
@@ -460,6 +471,7 @@ type fileConfig struct {
 	AWS              *fileAWSConfig           `yaml:"aws,omitempty"`
 	Azure            *fileAzureConfig         `yaml:"azure,omitempty"`
 	GCP              *fileGCPConfig           `yaml:"gcp,omitempty"`
+	Tencent          *fileTencentConfig       `yaml:"tencent,omitempty"`
 	Proxmox          *fileProxmoxConfig       `yaml:"proxmox,omitempty"`
 	SSH              *fileSSHConfig           `yaml:"ssh,omitempty"`
 	Sync             *fileSyncConfig          `yaml:"sync,omitempty"`
@@ -543,6 +555,17 @@ type fileGCPConfig struct {
 	SSHCIDRs       []string `yaml:"sshCIDRs,omitempty"`
 	RootGB         int64    `yaml:"rootGB,omitempty"`
 	ServiceAccount string   `yaml:"serviceAccount,omitempty"`
+}
+
+type fileTencentConfig struct {
+	SecretID  string `yaml:"secretId,omitempty"`
+	SecretKey string `yaml:"secretKey,omitempty"`
+	Region    string `yaml:"region,omitempty"`
+	Zone      string `yaml:"zone,omitempty"`
+	ImageID   string `yaml:"imageId,omitempty"`
+	VpcID     string `yaml:"vpcId,omitempty"`
+	SubnetID  string `yaml:"subnetId,omitempty"`
+	RootGB    int64  `yaml:"rootGB,omitempty"`
 }
 
 type fileProxmoxConfig struct {
@@ -1017,6 +1040,32 @@ func applyFileConfig(cfg *Config, file fileConfig) {
 		}
 		if file.GCP.ServiceAccount != "" {
 			cfg.GCPServiceAccount = file.GCP.ServiceAccount
+		}
+	}
+	if file.Tencent != nil {
+		if file.Tencent.SecretID != "" {
+			cfg.TencentSecretID = file.Tencent.SecretID
+		}
+		if file.Tencent.SecretKey != "" {
+			cfg.TencentSecretKey = file.Tencent.SecretKey
+		}
+		if file.Tencent.Region != "" {
+			cfg.TencentRegion = file.Tencent.Region
+		}
+		if file.Tencent.Zone != "" {
+			cfg.TencentZone = file.Tencent.Zone
+		}
+		if file.Tencent.ImageID != "" {
+			cfg.TencentImageID = file.Tencent.ImageID
+		}
+		if file.Tencent.VpcID != "" {
+			cfg.TencentVpcID = file.Tencent.VpcID
+		}
+		if file.Tencent.SubnetID != "" {
+			cfg.TencentSubnetID = file.Tencent.SubnetID
+		}
+		if file.Tencent.RootGB > 0 {
+			cfg.TencentRootGB = file.Tencent.RootGB
 		}
 	}
 	if file.Proxmox != nil {
@@ -1592,6 +1641,14 @@ func applyEnv(cfg *Config) {
 	if cidrs := os.Getenv("CRABBOX_GCP_SSH_CIDRS"); cidrs != "" {
 		cfg.GCPSSHCIDRs = splitCommaList(cidrs)
 	}
+	cfg.TencentSecretID = getenv("CRABBOX_TENCENT_SECRET_ID", getenv("TENCENT_SECRET_ID", getenv("TENCENTCLOUD_SECRET_ID", cfg.TencentSecretID)))
+	cfg.TencentSecretKey = getenv("CRABBOX_TENCENT_SECRET_KEY", getenv("TENCENT_SECRET_KEY", getenv("TENCENTCLOUD_SECRET_KEY", cfg.TencentSecretKey)))
+	cfg.TencentRegion = getenv("CRABBOX_TENCENT_REGION", cfg.TencentRegion)
+	cfg.TencentZone = getenv("CRABBOX_TENCENT_ZONE", cfg.TencentZone)
+	cfg.TencentImageID = getenv("CRABBOX_TENCENT_IMAGE_ID", cfg.TencentImageID)
+	cfg.TencentVpcID = getenv("CRABBOX_TENCENT_VPC_ID", cfg.TencentVpcID)
+	cfg.TencentSubnetID = getenv("CRABBOX_TENCENT_SUBNET_ID", cfg.TencentSubnetID)
+	cfg.TencentRootGB = int64(getenvInt("CRABBOX_TENCENT_ROOT_GB", int(cfg.TencentRootGB)))
 	cfg.Proxmox.APIURL = getenv("CRABBOX_PROXMOX_API_URL", cfg.Proxmox.APIURL)
 	cfg.Proxmox.TokenID = getenv("CRABBOX_PROXMOX_TOKEN_ID", cfg.Proxmox.TokenID)
 	cfg.Proxmox.TokenSecret = getenv("CRABBOX_PROXMOX_TOKEN_SECRET", cfg.Proxmox.TokenSecret)
@@ -1816,6 +1873,9 @@ func serverTypeForConfig(cfg Config) string {
 	if cfg.Provider == "gcp" {
 		return gcpMachineTypeCandidatesForClass(cfg.Class)[0]
 	}
+	if cfg.Provider == "tencent" {
+		return tencentInstanceTypeCandidatesForClass(cfg.Class)[0]
+	}
 	if cfg.Provider == "proxmox" {
 		return proxmoxServerTypeForConfig(cfg)
 	}
@@ -1846,6 +1906,9 @@ func serverTypeForProviderClass(provider, class string) string {
 	}
 	if provider == "gcp" {
 		return gcpMachineTypeCandidatesForClass(class)[0]
+	}
+	if provider == "tencent" {
+		return tencentInstanceTypeCandidatesForClass(class)[0]
 	}
 	if provider == "proxmox" {
 		return "template"

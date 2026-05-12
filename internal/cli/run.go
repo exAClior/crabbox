@@ -1406,6 +1406,19 @@ func deleteServer(ctx context.Context, cfg Config, server Server) error {
 		}
 		return client.DeleteServer(ctx, server.CloudID)
 	}
+	if cfg.Provider == "tencent" || server.Provider == "tencent" || strings.HasPrefix(server.CloudID, "ins-") {
+		client, err := newTencentClient(cfg)
+		if err != nil {
+			return err
+		}
+		if err := client.DeleteServer(ctx, server.CloudID); err != nil {
+			return err
+		}
+		if keyName := serverProviderKey(server); validCrabboxProviderKey(keyName) || validTencentProviderKey(keyName) {
+			return client.DeleteSSHKey(ctx, keyName)
+		}
+		return nil
+	}
 	client, err := newHetznerClient()
 	if err != nil {
 		return err

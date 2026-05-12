@@ -33,8 +33,8 @@ crabbox init [--force]
 crabbox config show [--json]
 crabbox config path
 crabbox config set-broker --url <url> --token-stdin [--provider hetzner|aws|azure|gcp]
-crabbox warmup [--provider hetzner|aws|azure|gcp|proxmox|ssh|blacksmith-testbox|namespace-devbox|semaphore|sprites|daytona|islo|e2b] [--target linux|macos|windows] [--desktop] [--browser] [--code] [--tailscale] [--network auto|tailscale|public] [--profile <name>] [--idle-timeout <duration>] [--timing-json]
-crabbox run [--id <lease-id-or-slug>] [--provider hetzner|aws|azure|gcp|proxmox|ssh|blacksmith-testbox|namespace-devbox|semaphore|sprites|daytona|islo|e2b] [--target linux|macos|windows] [--windows-mode normal|wsl2] [--desktop] [--browser] [--code] [--tailscale] [--network auto|tailscale|public] [--keep-on-failure] [--shell] [--script <file>|--script-stdin] [--fresh-pr <owner/repo#number>] [--allow-env <name>] [--env-from-profile <file>] [--checksum] [--debug] [--force-sync-large] [--preflight] [--capture-stdout <path>] [--capture-stderr <path>] [--capture-on-fail] [--download remote=local] [--timing-json] [--blacksmith-workflow <workflow>] -- <command...>
+crabbox warmup [--provider hetzner|aws|azure|gcp|tencent|proxmox|ssh|blacksmith-testbox|namespace-devbox|semaphore|sprites|daytona|islo|e2b] [--target linux|macos|windows] [--desktop] [--browser] [--code] [--tailscale] [--network auto|tailscale|public] [--profile <name>] [--idle-timeout <duration>] [--timing-json]
+crabbox run [--id <lease-id-or-slug>] [--provider hetzner|aws|azure|gcp|tencent|proxmox|ssh|blacksmith-testbox|namespace-devbox|semaphore|sprites|daytona|islo|e2b] [--target linux|macos|windows] [--windows-mode normal|wsl2] [--desktop] [--browser] [--code] [--tailscale] [--network auto|tailscale|public] [--keep-on-failure] [--shell] [--script <file>|--script-stdin] [--fresh-pr <owner/repo#number>] [--allow-env <name>] [--env-from-profile <file>] [--checksum] [--debug] [--force-sync-large] [--preflight] [--capture-stdout <path>] [--capture-stderr <path>] [--capture-on-fail] [--download remote=local] [--timing-json] [--blacksmith-workflow <workflow>] -- <command...>
 crabbox job list
 crabbox job run [--id <lease-id-or-slug>] [--dry-run] [--no-hydrate] [--stop auto|always|success|failure|never] <name>
 crabbox desktop launch --id <lease-id-or-slug> [--browser] [--url <url>] [--egress <profile>] [--webvnc] [--open] [-- <command...>]
@@ -294,7 +294,7 @@ Flags:
 
 ```text
 --id <lease-id-or-slug>  reuse an existing lease
---provider <name>        hetzner, aws, azure, ssh, blacksmith-testbox, namespace-devbox, semaphore, daytona, islo, or e2b
+--provider <name>        hetzner, aws, azure, gcp, tencent, proxmox, ssh, blacksmith-testbox, namespace-devbox, semaphore, daytona, islo, or e2b
 --target <name>          linux, macos, or windows
 --windows-mode <mode>    normal or wsl2
 --static-host <host>     existing SSH host for provider=ssh

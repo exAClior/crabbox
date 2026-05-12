@@ -2,7 +2,7 @@
 
 Read when:
 
-- changing Hetzner, AWS, Azure, Google Cloud, Proxmox, or Blacksmith Testbox provisioning;
+- changing Hetzner, AWS, Azure, Google Cloud, Tencent Cloud, Proxmox, or Blacksmith Testbox provisioning;
 - adding a backend;
 - adjusting machine classes, fallback order, regions, or images.
 
@@ -29,6 +29,7 @@ Direct provider backends can also run without the Crabbox coordinator:
 
 ```text
 proxmox    Proxmox VE QEMU VM clones exposed as SSH leases
+tencent    Tencent Cloud CVM instances exposed as SSH leases
 semaphore  Semaphore CI jobs exposed as SSH leases
 namespace  Namespace Devboxes exposed as SSH leases
 sprites    Sprites microVMs exposed as SSH leases through sprite proxy
@@ -126,6 +127,12 @@ fast      c4-standard-64, c3-standard-44, n2-standard-64, n2d-standard-64, c4-st
 large     c4-standard-96, c3-standard-88, n2-standard-80, n2d-standard-96, c4-standard-64
 beast     c4-standard-192, c4-standard-96, c3-standard-176, c3-standard-88, n2d-standard-224, n2-standard-128
 
+Tencent Cloud
+standard  S5.4XLARGE64, S6.4XLARGE64
+fast      S5.8XLARGE128, S6.8XLARGE128
+large     S5.12XLARGE192
+beast     S5.16XLARGE256, S6.16XLARGE256
+
 Namespace Devbox
 standard  S
 fast      M
@@ -133,7 +140,7 @@ large     L
 beast     XL
 ```
 
-Direct provider mode still exists when no coordinator is configured. It uses local AWS credentials, Azure credentials, Google Application Default Credentials, Proxmox API tokens, or `HCLOUD_TOKEN`/`HETZNER_TOKEN` and should stay secondary to the brokered path when a brokered provider is available.
+Direct provider mode still exists when no coordinator is configured. It uses local AWS credentials, Azure credentials, Google Application Default Credentials, Tencent CAM credentials, Proxmox API tokens, or `HCLOUD_TOKEN`/`HETZNER_TOKEN` and should stay secondary to the brokered path when a brokered provider is available.
 
 Tailscale is not a provider. Use `--tailscale` to add tailnet reachability to
 new managed Linux leases, or set a static host to a MagicDNS name/100.x address
