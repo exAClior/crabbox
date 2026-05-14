@@ -1,8 +1,12 @@
-FROM docker.io/library/golang:1.25-bookworm AS runner-build
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.25-bookworm AS runner-build
 
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 WORKDIR /src
 COPY cloudflare-container-runner/go.mod cloudflare-container-runner/main.go ./
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/crabbox-cloudflare-container-runner .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/crabbox-cloudflare-container-runner .
+
+FROM docker.io/library/golang:1.25-bookworm AS go-runtime
 
 FROM docker.io/library/node:24-bookworm
 
@@ -23,7 +27,7 @@ RUN apt-get update \
   && corepack prepare "pnpm@${PNPM_VERSION}" --activate \
   && pnpm config set store-dir /var/cache/crabbox/pnpm
 
-COPY --from=runner-build /usr/local/go /usr/local/go
+COPY --from=go-runtime /usr/local/go /usr/local/go
 COPY --from=runner-build /out/crabbox-cloudflare-container-runner /usr/local/bin/crabbox-cloudflare-container-runner
 RUN ln -sf /usr/local/go/bin/go /usr/local/bin/go \
   && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt

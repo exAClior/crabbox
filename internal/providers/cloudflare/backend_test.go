@@ -300,7 +300,7 @@ func TestCloudflareStatusPrunesExpiredClaim(t *testing.T) {
 		},
 		rt: Runtime{HTTP: server.Client()},
 	}
-	view, err := backend.Status(context.Background(), StatusRequest{ID: "blue-lobster"})
+	view, err := backend.Status(context.Background(), StatusRequest{ID: "blue-lobster", Wait: true, WaitTimeout: time.Nanosecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,6 +309,43 @@ func TestCloudflareStatusPrunesExpiredClaim(t *testing.T) {
 	}
 	if _, ok, err := resolveLeaseClaimForProvider("blue-lobster", providerName); err != nil || ok {
 		t.Fatalf("claim resolved after expired status ok=%t err=%v", ok, err)
+	}
+}
+
+func TestCloudflareRemoteDiskCheckRejectsZeroOrUnknownAvailable(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		stdout string
+		want   string
+	}{
+		{name: "zero", stdout: "0 /workspace/repo\n", want: "remote disk too small for sync"},
+		{name: "unknown", stdout: "not-a-number /workspace/repo\n", want: "could not determine remote disk headroom"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/sandboxes/cbx_test/exec-stream" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/x-ndjson")
+				_, _ = fmt.Fprintf(w, `{"type":"stdout","data":%q}`+"\n", tc.stdout)
+				_, _ = io.WriteString(w, `{"type":"complete","exitCode":0}`+"\n")
+			}))
+			defer server.Close()
+
+			cfg := Config{}
+			cfg.Cloudflare.APIURL = server.URL
+			cfg.Cloudflare.Token = "token"
+			backend := cloudflareBackend{cfg: cfg, rt: Runtime{HTTP: server.Client(), Stderr: io.Discard}}
+			client, err := newCloudflareClient(cfg, backend.rt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = backend.checkRemoteDiskForSync(context.Background(), client, "cbx_test", "/workspace/repo", 1024, 1024)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 

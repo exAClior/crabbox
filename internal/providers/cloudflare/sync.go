@@ -81,12 +81,15 @@ func (b *cloudflareBackend) checkRemoteDiskForSync(ctx context.Context, client *
 	if required <= 0 {
 		return nil
 	}
-	available, err := b.remoteDiskAvailable(ctx, client, sandboxID, workdir)
+	available, ok, err := b.remoteDiskAvailable(ctx, client, sandboxID, workdir)
 	if err != nil {
 		return err
 	}
+	if !ok {
+		return exit(6, "%s could not determine remote disk headroom for sync", providerName)
+	}
 	if available <= 0 {
-		return nil
+		return exit(6, "%s remote disk too small for sync: need %s for archive+extract, available %s; use a larger Cloudflare instance_type or reduce sync.exclude", providerName, byteCount(required), byteCount(available))
 	}
 	if available < required {
 		return exit(6, "%s remote disk too small for sync: need %s for archive+extract, available %s; use a larger Cloudflare instance_type or reduce sync.exclude", providerName, byteCount(required), byteCount(available))
@@ -98,27 +101,29 @@ func (b *cloudflareBackend) checkRemoteDiskForSync(ctx context.Context, client *
 	return nil
 }
 
-func (b *cloudflareBackend) remoteDiskAvailable(ctx context.Context, client *cloudflareClient, sandboxID, workdir string) (int64, error) {
+func (b *cloudflareBackend) remoteDiskAvailable(ctx context.Context, client *cloudflareClient, sandboxID, workdir string) (int64, bool, error) {
 	command := "set -o pipefail; df -B1 --output=avail,target /tmp " + shellQuote(workdir) + " | tail -n +2"
 	var stdout bytes.Buffer
 	if err := b.execShell(ctx, client, sandboxID, command, &stdout); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	var minAvailable int64
+	found := false
 	for _, line := range strings.Split(stdout.String(), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
 		}
 		available, err := strconv.ParseInt(fields[0], 10, 64)
-		if err != nil || available <= 0 {
+		if err != nil || available < 0 {
 			continue
 		}
-		if minAvailable == 0 || available < minAvailable {
+		if !found || available < minAvailable {
 			minAvailable = available
+			found = true
 		}
 	}
-	return minAvailable, nil
+	return minAvailable, found, nil
 }
 
 func byteCount(bytes int64) string {

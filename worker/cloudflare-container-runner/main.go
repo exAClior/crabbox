@@ -126,9 +126,17 @@ func handleExec(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	exitCode, err := runCommand(ctx, req, cwd, writer)
 	if err != nil {
+		if exitCode != 0 && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) {
+			writeCompleteAfterMinimumLifetime(writer, started, exitCode)
+			return
+		}
 		writer.write(streamEvent{Type: "error", Error: err.Error()})
 		return
 	}
+	writeCompleteAfterMinimumLifetime(writer, started, exitCode)
+}
+
+func writeCompleteAfterMinimumLifetime(writer *eventWriter, started time.Time, exitCode int) {
 	if remaining := minStreamLifetime - time.Since(started); remaining > 0 {
 		time.Sleep(remaining)
 	}

@@ -196,6 +196,39 @@ describe("Cloudflare runner lifecycle", () => {
     expect(capture.request?.headers.get("Content-Type")).toBeNull();
   });
 
+  it("returns a controlled 400 response for invalid create JSON", async () => {
+    const capture: CapturedInternalRequest = {};
+    const response = await worker.fetch(
+      new Request("https://runner.example/v1/sandboxes", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer runner-token",
+          "Content-Type": "application/json",
+        },
+        body: "{",
+      }),
+      envWithCapturedInternalRequest(capture),
+    );
+
+    expect(response.status).toBe(400);
+    expect(capture.id).toBeUndefined();
+    await expect(response.json()).resolves.toEqual({ error: "invalid json" });
+  });
+
+  it("returns a controlled 400 response for invalid durable object JSON", async () => {
+    const sandbox = new Sandbox({ storage: new MemoryStorage() });
+
+    const response = await sandbox.fetch(
+      new Request("http://crabbox.internal/__crabbox/exec-stream", {
+        method: "POST",
+        body: "{",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "invalid json" });
+  });
+
   it("stores lease metadata and schedules cleanup at the idle deadline", async () => {
     const sandbox = new Sandbox({ storage: new MemoryStorage() });
 

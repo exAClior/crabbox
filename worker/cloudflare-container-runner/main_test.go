@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -62,6 +63,55 @@ func TestHandleFileUploadWritesDestination(t *testing.T) {
 	if !bytes.Equal(data, []byte("payload")) {
 		t.Fatalf("uploaded data = %q, want payload", data)
 	}
+}
+
+func TestHandleExecTimeoutCompletesWithExitCode124(t *testing.T) {
+	body, err := json.Marshal(execRequest{
+		Command:   "sleep 1",
+		Cwd:       t.TempDir(),
+		TimeoutMS: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/exec", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handleExec(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	events := parseStreamEvents(t, rec.Body.String())
+	if len(events) == 0 {
+		t.Fatal("missing stream events")
+	}
+	last := events[len(events)-1]
+	if last.Type != "complete" || last.ExitCode == nil || *last.ExitCode != 124 {
+		t.Fatalf("last event = %#v, want complete exit 124", last)
+	}
+	for _, event := range events {
+		if event.Type == "error" {
+			t.Fatalf("unexpected error event: %#v", event)
+		}
+	}
+}
+
+func parseStreamEvents(t *testing.T, body string) []streamEvent {
+	t.Helper()
+	var events []streamEvent
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var event streamEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode stream event %q: %v", line, err)
+		}
+		events = append(events, event)
+	}
+	return events
 }
 
 func containsEnv(env []string, value string) bool {

@@ -214,10 +214,11 @@ func (b *cloudflareBackend) Status(ctx context.Context, req StatusRequest) (Stat
 			return StatusView{}, err
 		}
 		view := sandboxStatusView(leaseID, slug, sandbox)
+		if cloudflareTerminalState(view.State) {
+			removeLeaseClaim(leaseID)
+			return view, nil
+		}
 		if !req.Wait || view.Ready {
-			if cloudflareTerminalState(view.State) {
-				removeLeaseClaim(leaseID)
-			}
 			return view, nil
 		}
 		if b.now().After(deadline) {

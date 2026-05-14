@@ -65,6 +65,7 @@ export class Sandbox extends Container {
 
   private async createLease(request: Request): Promise<Response> {
     const body = await readObject(request);
+    if (body instanceof Response) return body;
     const id = cleanSandboxID(stringField(body, "id") ?? stringField(body, "leaseId") ?? "");
     if (!id) return json({ error: "id is required" }, 400);
 
@@ -142,6 +143,7 @@ export class Sandbox extends Container {
 
   private async execLeaseStream(request: Request): Promise<Response> {
     const body = await readObject(request);
+    if (body instanceof Response) return body;
     const command = stringField(body, "command")?.trim() ?? "";
     if (!command) return json({ error: "command is required" }, 400);
 
@@ -358,6 +360,7 @@ export default {
 
 async function createSandbox(request: Request, env: Env): Promise<Response> {
   const body = await readObject(request);
+  if (body instanceof Response) return body;
   const sandboxID = cleanSandboxID(stringField(body, "id") ?? stringField(body, "leaseId") ?? "");
   if (!sandboxID) return json({ error: "id is required" }, 400);
 
@@ -427,8 +430,13 @@ function authorize(request: Request, env: Env): Response | null {
   return null;
 }
 
-async function readObject(request: Request): Promise<Record<string, unknown>> {
-  const value = await request.json();
+async function readObject(request: Request): Promise<Record<string, unknown> | Response> {
+  let value: unknown;
+  try {
+    value = await request.json();
+  } catch {
+    return json({ error: "invalid json" }, 400);
+  }
   return isRecord(value) ? value : {};
 }
 
