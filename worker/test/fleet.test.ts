@@ -171,6 +171,62 @@ describe("fleet lease identity and idle", () => {
     expect(storage.alarm()).toBeUndefined();
   });
 
+  it("schedules the real expiry before stale cleanup retry metadata", async () => {
+    const storage = new MemoryStorage();
+    const fleet = testFleet(storage);
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    storage.seed(
+      "lease:cbx_000000000001",
+      testLease({
+        id: "cbx_000000000001",
+        cleanupAttempts: 1,
+        cleanupError: "previous failure",
+        cleanupFailedAt: new Date(Date.now() - 60_000).toISOString(),
+        cleanupRetryAt: new Date(Date.now() + 300_000).toISOString(),
+        expiresAt,
+      }),
+    );
+
+    await fleet.alarm();
+
+    expect(storage.alarm()).toBe(Date.parse(expiresAt));
+  });
+
+  it("clears cleanup retry metadata when an active lease heartbeats", async () => {
+    const storage = new MemoryStorage();
+    const fleet = testFleet(storage);
+    storage.seed(
+      "lease:cbx_000000000001",
+      testLease({
+        id: "cbx_000000000001",
+        owner: "peter@example.com",
+        org: "openclaw",
+        cleanupAttempts: 1,
+        cleanupError: "previous failure",
+        cleanupFailedAt: new Date(Date.now() - 60_000).toISOString(),
+        cleanupRetryAt: new Date(Date.now() + 300_000).toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }),
+    );
+
+    const heartbeat = await fleet.fetch(
+      request("POST", "/v1/leases/cbx_000000000001/heartbeat", {
+        headers: {
+          "x-crabbox-owner": "peter@example.com",
+          "x-crabbox-org": "openclaw",
+        },
+        body: { idleTimeoutSeconds: 120 },
+      }),
+    );
+
+    expect(heartbeat.status).toBe(200);
+    const { lease } = (await heartbeat.json()) as { lease: LeaseRecord };
+    expect(lease.cleanupAttempts).toBeUndefined();
+    expect(lease.cleanupError).toBeUndefined();
+    expect(lease.cleanupRetryAt).toBeUndefined();
+    expect(storage.alarm()).toBe(Date.parse(lease.expiresAt));
+  });
+
   it("creates leases through the public route with slug and idle metadata", async () => {
     const storage = new MemoryStorage();
     const fleet = testFleet(storage, {

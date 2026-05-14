@@ -503,11 +503,13 @@ func staleAWSCrabboxSSHIngressPermissions(group types.SecurityGroup, ports []str
 	desiredCIDRs := awsSSHDesiredCIDRs(cidrs)
 	var stale []types.IpPermission
 	for _, permission := range group.IpPermissions {
-		if !isTCPPortPermission(permission, desiredPorts) {
+		port, ok := exactTCPPermissionPort(permission)
+		if !ok {
 			continue
 		}
-		staleIPv4 := staleAWSIpRanges(permission.IpRanges, desiredCIDRs)
-		staleIPv6 := staleAWSIpv6Ranges(permission.Ipv6Ranges, desiredCIDRs)
+		_, keepPort := desiredPorts[port]
+		staleIPv4 := staleAWSIpRanges(permission.IpRanges, desiredCIDRs, keepPort)
+		staleIPv6 := staleAWSIpv6Ranges(permission.Ipv6Ranges, desiredCIDRs, keepPort)
 		if len(staleIPv4) == 0 && len(staleIPv6) == 0 {
 			continue
 		}
@@ -536,36 +538,37 @@ func awsSSHDesiredCIDRs(cidrs []string) map[string]struct{} {
 	return desired
 }
 
-func isTCPPortPermission(permission types.IpPermission, desiredPorts map[int32]struct{}) bool {
+func exactTCPPermissionPort(permission types.IpPermission) (int32, bool) {
 	if aws.ToString(permission.IpProtocol) != "tcp" || permission.FromPort == nil || permission.ToPort == nil || *permission.FromPort != *permission.ToPort {
-		return false
+		return 0, false
 	}
-	_, ok := desiredPorts[*permission.FromPort]
-	return ok
+	return *permission.FromPort, true
 }
 
-func staleAWSIpRanges(ranges []types.IpRange, desiredCIDRs map[string]struct{}) []types.IpRange {
+func staleAWSIpRanges(ranges []types.IpRange, desiredCIDRs map[string]struct{}, keepPort bool) []types.IpRange {
 	stale := make([]types.IpRange, 0, len(ranges))
 	for _, r := range ranges {
 		if aws.ToString(r.Description) != awsSSHIngressDescription {
 			continue
 		}
 		cidr := aws.ToString(r.CidrIp)
-		if _, ok := desiredCIDRs[cidr]; !ok {
+		_, keepCIDR := desiredCIDRs[cidr]
+		if !keepPort || !keepCIDR {
 			stale = append(stale, types.IpRange{CidrIp: r.CidrIp, Description: r.Description})
 		}
 	}
 	return stale
 }
 
-func staleAWSIpv6Ranges(ranges []types.Ipv6Range, desiredCIDRs map[string]struct{}) []types.Ipv6Range {
+func staleAWSIpv6Ranges(ranges []types.Ipv6Range, desiredCIDRs map[string]struct{}, keepPort bool) []types.Ipv6Range {
 	stale := make([]types.Ipv6Range, 0, len(ranges))
 	for _, r := range ranges {
 		if aws.ToString(r.Description) != awsSSHIngressDescription {
 			continue
 		}
 		cidr := aws.ToString(r.CidrIpv6)
-		if _, ok := desiredCIDRs[cidr]; !ok {
+		_, keepCIDR := desiredCIDRs[cidr]
+		if !keepPort || !keepCIDR {
 			stale = append(stale, types.Ipv6Range{CidrIpv6: r.CidrIpv6, Description: r.Description})
 		}
 	}

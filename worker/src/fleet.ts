@@ -1043,6 +1043,7 @@ export class FleetDurableObject implements DurableObject {
     lease.updatedAt = now.toISOString();
     lease.lastTouchedAt = now.toISOString();
     lease.expiresAt = recomputeLeaseExpiresAt(lease, now).toISOString();
+    clearLeaseCleanupMetadata(lease);
     await this.putLease(lease);
     await this.scheduleAlarm();
   }
@@ -2995,10 +2996,7 @@ export class FleetDurableObject implements DurableObject {
         lease.state = "expired";
         lease.updatedAt = nowISO;
         lease.endedAt = nowISO;
-        delete lease.cleanupAttempts;
-        delete lease.cleanupError;
-        delete lease.cleanupFailedAt;
-        delete lease.cleanupRetryAt;
+        clearLeaseCleanupMetadata(lease);
         await this.putLease(lease);
       }),
     );
@@ -3301,10 +3299,7 @@ export class FleetDurableObject implements DurableObject {
     lease.updatedAt = now;
     lease.releasedAt = now;
     lease.endedAt = now;
-    delete lease.cleanupAttempts;
-    delete lease.cleanupError;
-    delete lease.cleanupFailedAt;
-    delete lease.cleanupRetryAt;
+    clearLeaseCleanupMetadata(lease);
     if (options.keep !== undefined) {
       lease.keep = options.keep;
     }
@@ -4530,12 +4525,23 @@ function activeSlugCollision(
 }
 
 function nextLeaseAlarmTime(lease: LeaseRecord): number {
+  const now = Date.now();
   const expiresAt = Date.parse(lease.expiresAt);
   const cleanupRetryAt = Date.parse(lease.cleanupRetryAt ?? "");
-  if (Number.isFinite(cleanupRetryAt) && cleanupRetryAt > Date.now()) {
-    return cleanupRetryAt;
+  if (Number.isFinite(cleanupRetryAt) && cleanupRetryAt > now) {
+    if (Number.isFinite(expiresAt) && expiresAt <= now) {
+      return cleanupRetryAt;
+    }
+    return Math.min(expiresAt, cleanupRetryAt);
   }
   return expiresAt;
+}
+
+function clearLeaseCleanupMetadata(lease: LeaseRecord): void {
+  delete lease.cleanupAttempts;
+  delete lease.cleanupError;
+  delete lease.cleanupFailedAt;
+  delete lease.cleanupRetryAt;
 }
 
 function normalizeShareUser(value: string | undefined): string {
