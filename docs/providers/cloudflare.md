@@ -82,9 +82,13 @@ printf '%s' "$CRABBOX_CLOUDFLARE_RUNNER_TOKEN" \
 
 The checked-in runner config defines one Durable Object binding per predefined
 Cloudflare container instance type. Crabbox maps `--class standard|fast|large|beast`
-to `standard-1|standard-2|standard-3|standard-4`; `beast` is the default and has
-the largest predefined disk budget. Use `--type lite|basic|standard-1|standard-2|standard-3|standard-4`
-to pin a specific Cloudflare type.
+to `standard-3|standard-4|standard-4|standard-4`; `beast` is the default and
+has the largest predefined disk budget. `standard-1` and `standard-2` remain
+available as explicit `--type` values for tiny smoke checks, but Crabbox does
+not map a machine class to them because they are materially smaller than the
+other providers' `standard` classes. Use
+`--type lite|basic|standard-1|standard-2|standard-3|standard-4` to pin a
+specific Cloudflare type.
 
 Check the active container app after deploy:
 

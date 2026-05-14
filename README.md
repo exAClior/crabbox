@@ -188,14 +188,15 @@ Namespace  standard  S
            large     L
            beast     XL
 
-Cloudflare standard  standard-1
-           fast      standard-2
-           large     standard-3
+Cloudflare standard  standard-3
+           fast      standard-4
+           large     standard-4
            beast     standard-4
 ```
 
 Override with `--type` or `CRABBOX_SERVER_TYPE` for a specific instance.
-Cloudflare also accepts `lite` and `basic` as explicit `--type` values.
+Cloudflare also accepts `lite`, `basic`, `standard-1`, and `standard-2` as
+explicit `--type` values.
 Providers without a row either use provider-native capacity settings or reject
 class/type selection.
 

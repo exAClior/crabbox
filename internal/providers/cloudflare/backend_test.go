@@ -114,8 +114,8 @@ func TestCloudflareCreateSandboxSendsInstanceType(t *testing.T) {
 	if _, _, _, err := backend.createSandbox(context.Background(), client, Repo{Name: "my-app", Root: t.TempDir()}, false); err != nil {
 		t.Fatal(err)
 	}
-	if got.InstanceType != "standard-2" {
-		t.Fatalf("instance type = %q, want standard-2", got.InstanceType)
+	if got.InstanceType != "standard-4" {
+		t.Fatalf("instance type = %q, want standard-4", got.InstanceType)
 	}
 }
 
@@ -209,8 +209,8 @@ func TestCloudflareAliasAcceptsResourceFlags(t *testing.T) {
 	if err := ApplyCloudflareProviderFlags(&cfg, fs, values); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ServerType != "standard-1" {
-		t.Fatalf("server type = %q, want standard-1", cfg.ServerType)
+	if cfg.ServerType != "standard-3" {
+		t.Fatalf("server type = %q, want standard-3", cfg.ServerType)
 	}
 }
 

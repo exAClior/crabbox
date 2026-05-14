@@ -2119,11 +2119,9 @@ func cloudflareContainerInstanceTypeForClass(class string) string {
 	case "", "beast":
 		return "standard-4"
 	case "standard":
-		return "standard-1"
-	case "fast":
-		return "standard-2"
-	case "large":
 		return "standard-3"
+	case "fast", "large":
+		return "standard-4"
 	default:
 		if instanceType, ok := normalizeCloudflareContainerInstanceType(class); ok {
 			return instanceType

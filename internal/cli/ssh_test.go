@@ -1118,9 +1118,9 @@ func TestCloudflareContainerInstanceTypeMapping(t *testing.T) {
 		want  string
 	}{
 		{class: "", want: "standard-4"},
-		{class: "standard", want: "standard-1"},
-		{class: "fast", want: "standard-2"},
-		{class: "large", want: "standard-3"},
+		{class: "standard", want: "standard-3"},
+		{class: "fast", want: "standard-4"},
+		{class: "large", want: "standard-4"},
 		{class: "beast", want: "standard-4"},
 		{class: "lite", want: "lite"},
 		{class: "basic", want: "basic"},
@@ -1153,8 +1153,8 @@ func TestCloudflareServerTypeForConfig(t *testing.T) {
 		cfg  Config
 		want string
 	}{
-		{cfg: Config{Provider: "cloudflare", Class: "standard"}, want: "standard-1"},
-		{cfg: Config{Provider: "cf", Class: "large"}, want: "standard-3"},
+		{cfg: Config{Provider: "cloudflare", Class: "standard"}, want: "standard-3"},
+		{cfg: Config{Provider: "cf", Class: "large"}, want: "standard-4"},
 	}
 	for _, tt := range tests {
 		if got := serverTypeForConfig(tt.cfg); got != tt.want {
@@ -1174,7 +1174,7 @@ func TestServerTypeForProviderClassDirectProviders(t *testing.T) {
 		{provider: "islo", class: "beast", want: ""},
 		{provider: "e2b", class: "beast", want: "base"},
 		{provider: "daytona", class: "beast", want: "snapshot"},
-		{provider: "cloudflare", class: "standard", want: "standard-1"},
+		{provider: "cloudflare", class: "standard", want: "standard-3"},
 		{provider: "cf", class: "beast", want: "standard-4"},
 		{provider: "azure", class: "standard", want: "Standard_D32ads_v6"},
 		{provider: "google", class: "standard", want: "c4-standard-32"},
