@@ -71,6 +71,17 @@ Deploy the Worker and container image:
 npm run deploy:cloudflare --prefix worker
 ```
 
+For a repeatable local gate, deploy, and live smoke, use:
+
+```sh
+scripts/deploy-cloudflare-smoke.sh
+```
+
+It expects `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`,
+`CRABBOX_CLOUDFLARE_RUNNER_TOKEN`, and `CRABBOX_CLOUDFLARE_RUNNER_URL` in the
+environment. Set `CRABBOX_CLOUDFLARE_SKIP_DEPLOY=1` to run only the local checks
+and live smoke, or `CRABBOX_CLOUDFLARE_SKIP_SMOKE=1` to stop after deploy.
+
 The deploy script passes `--containers-rollout=immediate` so Worker and
 container changes roll out together. If you call Wrangler directly, include that
 flag:
@@ -107,6 +118,11 @@ Use `--type lite|basic|standard-1|standard-2|standard-3|standard-4` for smaller
 smoke tests or quota control. Change `max_instances` in
 `worker/wrangler.cloudflare.jsonc` when the account should allow more or fewer
 concurrent containers.
+
+`lite` is intended for no-sync and quick command smoke tests. Use `basic` or a
+`standard-*` type for archive sync, and prefer `standard-*` for dependency-heavy
+builds or tests. Large module downloads can exhaust the smaller container disks
+before the command itself starts.
 
 Cloudflare's current predefined instance types range from `lite` to
 `standard-4`; `standard-4` is 4 vCPU, 12 GiB memory, and 20 GB disk. See
@@ -146,9 +162,10 @@ Then run a sync smoke from a checkout:
 ```sh
 crabbox run \
   --provider cloudflare \
+  --type basic \
   --timing-json \
   --shell \
-  -- 'test -f go.mod && go test ./internal/providers/cloudflare -run TestCloudflare -count=1'
+  -- 'test -f go.mod && rg -n "stopped_with_code" internal/providers/cloudflare'
 ```
 
 ## Behavior

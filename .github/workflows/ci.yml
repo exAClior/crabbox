@@ -70,6 +70,12 @@ jobs:
           cache: npm
           cache-dependency-path: worker/package-lock.json
 
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: worker/cloudflare-container-runner/go.mod
+          cache: false
+
       - name: Install
         run: npm ci
         working-directory: worker
@@ -89,6 +95,10 @@ jobs:
       - name: Test
         run: npm test
         working-directory: worker
+
+      - name: Test Cloudflare container runner
+        run: go test ./...
+        working-directory: worker/cloudflare-container-runner
 
       - name: Build
         run: npm run build

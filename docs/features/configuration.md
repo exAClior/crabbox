@@ -280,6 +280,8 @@ Keep `CRABBOX_CLOUDFLARE_RUNNER_TOKEN` in the shell or credential manager.
 `CRABBOX_CLOUDFLARE_RUNNER_URL` can provide the runner URL from the
 environment. Repo config should select the runner URL and workdir, not hold
 bearer tokens.
+`crabbox config show` reports the runner URL, workdir, and token state as
+`cloudflare.auth` without printing the token.
 `--type` can select one of the instance types wired into the deployed runner.
 Update `worker/wrangler.cloudflare.jsonc` and redeploy the runner when changing
 available `instance_type` bindings or `max_instances`.

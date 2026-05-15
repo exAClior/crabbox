@@ -266,6 +266,8 @@ Before tagging a release:
 - `scripts/check-go-coverage.sh 90.0`
 - Worker format, lint, typecheck, tests, and build:
   `npm run format:check --prefix worker && npm run lint --prefix worker && npm run check --prefix worker && npm test --prefix worker && npm run build --prefix worker`
+- Cloudflare container runner tests:
+  `(cd worker/cloudflare-container-runner && go test ./...)`
 - `npm run docs:check`
 - `git diff --check`
 - Live smoke at least one coordinator-backed `crabbox run`, then verify

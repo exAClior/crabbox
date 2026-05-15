@@ -99,6 +99,11 @@ func (a App) configShow(args []string) error {
 			"workdir":  cfg.E2B.Workdir,
 			"user":     cfg.E2B.User,
 		},
+		"cloudflare": map[string]any{
+			"apiUrl":  cfg.Cloudflare.APIURL,
+			"auth":    tokenState(cfg.Cloudflare.Token),
+			"workdir": cfg.Cloudflare.Workdir,
+		},
 		"static": map[string]any{
 			"id":       cfg.Static.ID,
 			"name":     cfg.Static.Name,
@@ -175,6 +180,7 @@ func (a App) configShow(args []string) error {
 	fmt.Fprintf(a.Stdout, "blacksmith org=%s workflow=%s job=%s ref=%s idle_timeout=%s debug=%t\n", blank(cfg.Blacksmith.Org, "-"), blank(cfg.Blacksmith.Workflow, "-"), blank(cfg.Blacksmith.Job, "-"), blank(cfg.Blacksmith.Ref, "-"), cfg.Blacksmith.IdleTimeout, cfg.Blacksmith.Debug)
 	fmt.Fprintf(a.Stdout, "namespace image=%s size=%s repository=%s site=%s volume_size_gb=%d auto_stop_idle_timeout=%s work_root=%s delete_on_release=%t\n", cfg.Namespace.Image, blank(cfg.Namespace.Size, "-"), blank(cfg.Namespace.Repository, "-"), blank(cfg.Namespace.Site, "-"), cfg.Namespace.VolumeSizeGB, cfg.Namespace.AutoStopIdleTimeout, cfg.Namespace.WorkRoot, cfg.Namespace.DeleteOnRelease)
 	fmt.Fprintf(a.Stdout, "e2b api_url=%s domain=%s template=%s workdir=%s user=%s\n", cfg.E2B.APIURL, cfg.E2B.Domain, cfg.E2B.Template, cfg.E2B.Workdir, blank(cfg.E2B.User, "-"))
+	fmt.Fprintf(a.Stdout, "cloudflare api_url=%s workdir=%s auth=%s\n", blank(cfg.Cloudflare.APIURL, "-"), cfg.Cloudflare.Workdir, tokenState(cfg.Cloudflare.Token))
 	fmt.Fprintf(a.Stdout, "static id=%s name=%s host=%s user=%s port=%s work_root=%s\n", blank(cfg.Static.ID, "-"), blank(cfg.Static.Name, "-"), blank(cfg.Static.Host, "-"), blank(cfg.Static.User, "-"), blank(cfg.Static.Port, "-"), blank(cfg.Static.WorkRoot, "-"))
 	fmt.Fprintf(a.Stdout, "results junit=%s\n", blank(strings.Join(cfg.Results.JUnit, ","), "-"))
 	fmt.Fprintf(a.Stdout, "cache pnpm=%t npm=%t docker=%t git=%t max_gb=%d purge_on_release=%t\n", cfg.Cache.Pnpm, cfg.Cache.Npm, cfg.Cache.Docker, cfg.Cache.Git, cfg.Cache.MaxGB, cfg.Cache.PurgeOnRelease)

@@ -405,6 +405,7 @@ scripts/check-go-coverage.sh 85.0
 npm ci --prefix worker
 npm test --prefix worker
 npm run build --prefix worker
+(cd worker/cloudflare-container-runner && go test ./...)
 
 # Docs
 npm run docs:check
@@ -413,9 +414,11 @@ npm run docs:check
 CRABBOX_LIVE=1 CRABBOX_LIVE_REPO=/path/to/openclaw scripts/live-smoke.sh
 # Add Blacksmith only for repos with a Testbox workflow.
 CRABBOX_LIVE=1 CRABBOX_LIVE_PROVIDERS=blacksmith-testbox scripts/live-smoke.sh
+# Cloudflare Containers deploy plus live smoke, when Cloudflare credentials are available.
+scripts/deploy-cloudflare-smoke.sh
 ```
 
-CI runs the full gate (gofmt, vet, race tests, coverage threshold, docs link/build check, GoReleaser snapshot, Worker lint/typecheck/tests/build) on every push and PR. Tagged pushes matching `v*` publish Go archives via GoReleaser and bump the Homebrew formula at [openclaw/homebrew-tap](https://github.com/openclaw/homebrew-tap).
+CI runs the full gate (gofmt, vet, race tests, coverage threshold, docs link/build check, GoReleaser snapshot, Worker lint/typecheck/tests/build, and Cloudflare container runner Go tests) on every push and PR. Tagged pushes matching `v*` publish Go archives via GoReleaser and bump the Homebrew formula at [openclaw/homebrew-tap](https://github.com/openclaw/homebrew-tap).
 
 Worker deployment, required secrets, and DNS routing live in [docs/infrastructure.md](docs/infrastructure.md).
 
