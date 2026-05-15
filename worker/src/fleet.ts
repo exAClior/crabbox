@@ -8,7 +8,7 @@ import {
   isRetryableAWSProvisioningError,
 } from "./aws";
 import { AzureClient } from "./azure";
-import { azureLocationFor, leaseConfig, validCIDRs } from "./config";
+import { azureLocationFor, leaseConfig, validCIDRs, type LeaseConfig } from "./config";
 import { GCPClient } from "./gcp";
 import { HetznerClient } from "./hetzner";
 import { errorMessage, json, pathParts, readJson, requestOwner } from "./http";
@@ -191,6 +191,29 @@ interface CodePendingWebSocketFrame {
   chunks: string[];
 }
 
+interface LeaseCloudAudit {
+  leaseID: string;
+  slug?: string;
+  provider: Provider;
+  state: LeaseRecord["state"];
+  target: LeaseRecord["target"];
+  owner: string;
+  org: string;
+  region?: string;
+  cloudID: string;
+  host: string;
+  serverType: string;
+  expiresAt: string;
+  cleanupAttempts?: number;
+  cleanupError?: string;
+  cleanupRetryAt?: string;
+  cloudStatus: "found" | "missing" | "error";
+  cloudState?: string;
+  cloudHost?: string;
+  cloudServerType?: string;
+  message?: string;
+}
+
 type BridgeAttachment =
   | { kind: "webvnc-agent"; leaseID: string; id: string }
   | {
@@ -309,6 +332,9 @@ export class FleetDurableObject implements DurableObject {
       }
       if (method === "GET" && parts.join("/") === "v1/admin/leases") {
         return await this.adminLeases(request);
+      }
+      if (method === "GET" && parts.join("/") === "v1/admin/lease-audit") {
+        return await this.adminLeaseAudit(request);
       }
       if (parts[0] === "v1" && parts[1] === "admin" && parts[2] === "leases" && parts[3]) {
         return await this.adminLeaseRoute(request, parts[3], parts[4]);
@@ -815,11 +841,24 @@ export class FleetDurableObject implements DurableObject {
     const org = requestOrg(request, this.env);
     const input = await readJson<LeaseRequest>(request);
     const config = leaseConfig(input);
+    if (!isAdminRequest(request) && hasNativeLeaseSource(config)) {
+      return json(
+        {
+          error: "admin_required",
+          message: "native snapshot/image lease sources require admin-token auth",
+        },
+        { status: 403 },
+      );
+    }
     if (config.provider === "aws" && config.awsSSHCIDRs.length === 0) {
       config.awsSSHCIDRs = requestSourceCIDRs(request);
     }
-    if (config.provider === "aws" && !config.awsAMI) {
-      config.awsAMI = (await this.promotedAWSImage())?.id ?? "";
+    if (config.provider === "aws" && !config.awsAMI && !config.awsSnapshot) {
+      const promoted = await this.promotedAWSImage();
+      config.awsAMI = promoted?.id ?? "";
+      if (promoted?.region) {
+        config.awsRegion = promoted.region;
+      }
     }
     if (config.provider === "azure" && !config.azureLocation) {
       config.azureLocation = azureLocationFor(this.env, "");
@@ -2520,6 +2559,104 @@ export class FleetDurableObject implements DurableObject {
     return json({ leases: this.filterLeases(await this.leaseRecords(), request) });
   }
 
+  private async adminLeaseAudit(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const provider = (url.searchParams.get("provider") ?? "aws").trim().toLowerCase();
+    if (provider !== "aws") {
+      return json(
+        {
+          error: "unsupported_provider",
+          message: "lease audit currently supports provider=aws",
+        },
+        { status: 400 },
+      );
+    }
+    const state = url.searchParams.get("state") ?? "expired";
+    const owner = url.searchParams.get("owner") ?? "";
+    const org = url.searchParams.get("org") ?? "";
+    const limit = clampLimit(url.searchParams.get("limit"), 100);
+    const leases = (await this.leaseRecords())
+      .filter((lease) => lease.provider === "aws")
+      .filter((lease) => !state || lease.state === state)
+      .filter((lease) => !owner || lease.owner === owner)
+      .filter((lease) => !org || lease.org === org)
+      .filter((lease) => Boolean(lease.cloudID))
+      .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit);
+    const audits = await Promise.all(leases.map((lease) => this.auditAWSLeaseCloud(lease)));
+    return json({ audits });
+  }
+
+  private async auditAWSLeaseCloud(lease: LeaseRecord): Promise<LeaseCloudAudit> {
+    const audit: LeaseCloudAudit = {
+      leaseID: lease.id,
+      provider: lease.provider,
+      state: lease.state,
+      target: lease.target,
+      owner: lease.owner,
+      org: lease.org,
+      cloudID: lease.cloudID,
+      host: lease.host,
+      serverType: lease.serverType,
+      expiresAt: lease.expiresAt,
+      cloudStatus: "error",
+    };
+    if (lease.slug) {
+      audit.slug = lease.slug;
+    }
+    if (lease.region) {
+      audit.region = lease.region;
+    }
+    if (lease.cleanupAttempts !== undefined) {
+      audit.cleanupAttempts = lease.cleanupAttempts;
+    }
+    if (lease.cleanupError) {
+      audit.cleanupError = lease.cleanupError;
+    }
+    if (lease.cleanupRetryAt) {
+      audit.cleanupRetryAt = lease.cleanupRetryAt;
+    }
+    try {
+      const server = await this.awsLeaseServer(lease);
+      if (isAWSTerminalInstanceState(server.status)) {
+        return {
+          ...audit,
+          cloudStatus: "missing",
+          cloudState: server.status,
+          message: `aws instance is ${server.status}`,
+        };
+      }
+      return {
+        ...audit,
+        cloudStatus: "found",
+        cloudState: server.status,
+        cloudHost: server.host,
+        cloudServerType: server.serverType,
+      };
+    } catch (error) {
+      const message = errorMessage(error);
+      if (isCloudNotFoundError(message)) {
+        return { ...audit, cloudStatus: "missing", message };
+      }
+      return { ...audit, cloudStatus: "error", message };
+    }
+  }
+
+  private async awsLeaseServer(lease: LeaseRecord): Promise<ProviderMachine> {
+    const provider = this.provider("aws", lease.region);
+    if (provider.getServer) {
+      return await provider.getServer(lease.cloudID);
+    }
+    const machines = await provider.listCrabboxServers();
+    const server = machines.find(
+      (machine) => machine.cloudID === lease.cloudID || String(machine.id) === lease.cloudID,
+    );
+    if (!server) {
+      throw new Error(`aws instance not found: ${lease.cloudID}`);
+    }
+    return server;
+  }
+
   private async adminLeaseRoute(
     request: Request,
     leaseID: string,
@@ -2915,6 +3052,7 @@ export class FleetDurableObject implements DurableObject {
       id?: string;
       name?: string;
       noReboot?: boolean;
+      strategy?: string;
     }>(request);
     const leaseID = input.leaseID ?? input.id ?? "";
     const name = input.name ?? "";
@@ -2928,34 +3066,97 @@ export class FleetDurableObject implements DurableObject {
     if (!lease) {
       return notFound();
     }
-    if (lease.provider !== "aws" || !lease.cloudID) {
+    if (!lease.cloudID || !providerSupportsNativeImages(lease.provider)) {
       return json(
-        { error: "unsupported_provider", message: "only AWS leases can be imaged" },
+        {
+          error: "unsupported_provider",
+          message: "native images are supported for AWS, Azure, and GCP leases",
+        },
         { status: 400 },
       );
     }
-    const image = await this.provider("aws", lease.region).createImage(
+    const strategy = checkpointStrategy(input.strategy);
+    if (!strategy) {
+      return json(
+        {
+          error: "invalid_strategy",
+          message: "checkpoint strategy must be auto, disk-snapshot, or image",
+        },
+        { status: 400 },
+      );
+    }
+    if (lease.provider === "azure" && strategy === "image") {
+      return json(
+        {
+          error: "unsupported_strategy",
+          message:
+            "Azure managed images require a stopped/generalized source VM; use disk-snapshot checkpoints for active Azure leases",
+        },
+        { status: 400 },
+      );
+    }
+    const image = await this.provider(
+      lease.provider,
+      lease.region,
+      lease.providerProject,
+    ).createImage(
       lease.cloudID,
-      name,
+      providerImageResourceName(lease.provider, name, leaseID),
       input.noReboot ?? true,
+      strategy,
     );
     return json({ image }, { status: 201 });
   }
 
   private async imageRoute(request: Request, imageID: string, action?: string): Promise<Response> {
     const method = request.method.toUpperCase();
-    if (!validImageID(imageID)) {
+    const decodedImageID = decodeImageRouteID(imageID);
+    if (!validImageRouteID(decodedImageID)) {
       return json({ error: "invalid_image_id" }, { status: 400 });
     }
+    const url = new URL(request.url);
+    const provider = providerFromQuery(url.searchParams.get("provider"));
+    if (!provider) {
+      return json(
+        { error: "unsupported_provider", message: "image provider must be aws, azure, or gcp" },
+        { status: 400 },
+      );
+    }
+    const region = url.searchParams.get("region") ?? undefined;
+    const project = url.searchParams.get("project") ?? undefined;
+    const kind = url.searchParams.get("kind") ?? undefined;
     if (method === "GET" && action === undefined) {
-      const image = await this.provider("aws").getImage(imageID);
+      const image = await this.provider(provider, region, project).getImage(decodedImageID, kind);
       return json({ image });
     }
+    if (method === "DELETE" && action === undefined) {
+      const promoted =
+        provider === "aws"
+          ? await this.state.storage.get<PromotedImageRecord>(promotedAWSImageKey())
+          : undefined;
+      if (promoted?.id === decodedImageID) {
+        return json(
+          {
+            error: "image_promoted",
+            message: `image ${decodedImageID} is the promoted AWS image; promote another image before deleting it`,
+          },
+          { status: 409 },
+        );
+      }
+      await this.provider(provider, region, project).deleteImage(decodedImageID, kind);
+      return json({ imageID: decodedImageID, deleted: true });
+    }
     if (method === "POST" && action === "promote") {
-      const image = await this.provider("aws").getImage(imageID);
+      if (provider !== "aws") {
+        return json(
+          { error: "unsupported_provider", message: "image promotion is currently AWS-only" },
+          { status: 400 },
+        );
+      }
+      const image = await this.provider("aws", region).getImage(decodedImageID);
       if (image.state !== "available") {
         return json(
-          { error: "image_not_available", message: `image ${imageID} is ${image.state}` },
+          { error: "image_not_available", message: `image ${decodedImageID} is ${image.state}` },
           { status: 409 },
         );
       }
@@ -3532,12 +3733,86 @@ function validEgressSessionID(value: string | undefined): value is string {
   return typeof value === "string" && /^egress_[A-Za-z0-9_.:-]{6,80}$/.test(value);
 }
 
-function validImageID(value: string | undefined): value is string {
-  return typeof value === "string" && /^ami-[a-f0-9]{8,32}$/.test(value);
+function validImageRouteID(value: string | undefined): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_./:-]{1,512}$/.test(value);
+}
+
+function decodeImageRouteID(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return "";
+  }
 }
 
 function validImageName(value: string): boolean {
   return /^[A-Za-z0-9()[\]./_ -]{3,128}$/.test(value);
+}
+
+function providerSupportsNativeImages(provider: Provider): boolean {
+  return provider === "aws" || provider === "azure" || provider === "gcp";
+}
+
+function hasNativeLeaseSource(config: LeaseConfig): boolean {
+  return Boolean(
+    config.awsSnapshot || config.azureSnapshot || config.gcpMachineImage || config.gcpSnapshot,
+  );
+}
+
+function checkpointStrategy(value: string | undefined): "image" | "disk-snapshot" | undefined {
+  switch ((value ?? "").trim().toLowerCase()) {
+    case "image":
+    case "ami":
+    case "machine-image":
+    case "managed-image":
+      return "image";
+    case "":
+    case "auto":
+    case "snapshot":
+    case "disk":
+    case "disk-snapshot":
+    case "disk_snapshot":
+      return "disk-snapshot";
+    default:
+      return undefined;
+  }
+}
+
+function providerFromQuery(value: string | null): Provider | undefined {
+  const provider = (value ?? "").trim().toLowerCase();
+  if (!provider) return "aws";
+  if (provider === "azure" || provider === "gcp" || provider === "aws") {
+    return provider;
+  }
+  return undefined;
+}
+
+function providerImageResourceName(provider: Provider, name: string, leaseID: string): string {
+  if (provider === "aws") {
+    return name;
+  }
+  const allowed = provider === "gcp" ? /[^a-z0-9-]/g : /[^a-z0-9_.-]/g;
+  const normalized = name.trim().toLowerCase().replaceAll(allowed, "-");
+  const trimmed =
+    provider === "gcp"
+      ? normalized
+          .replaceAll(/^[^a-z]+/g, "")
+          .replaceAll(/-+/g, "-")
+          .replaceAll(/-+$/g, "")
+      : normalized
+          .replaceAll(/^[^a-z]+/g, "")
+          .replaceAll(/-+/g, "-")
+          .replaceAll(/[-.]+$/g, "");
+  const fallback = leaseID.toLowerCase().replaceAll(/[^a-z0-9-]/g, "-");
+  const maxLength = provider === "gcp" ? 63 : 80;
+  const truncated = (trimmed || `checkpoint-${fallback}`).slice(0, maxLength);
+  return provider === "gcp"
+    ? truncated.replaceAll(/-+$/g, "")
+    : truncated.replaceAll(/[-.]+$/g, "");
+}
+
+function unsupportedProviderImageLifecycle(provider: Provider) {
+  return () => Promise.reject(new Error(`${provider} images are not supported`));
 }
 
 function validCrabboxProviderKey(value: string | undefined): value is string {
@@ -3574,11 +3849,27 @@ function adminRouteError(request: Request, method: string, parts: string[]): Res
   return json({ error: "forbidden", message: "admin token required" }, { status: 403 });
 }
 
+function isCloudNotFoundError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("not found") ||
+    lower.includes("invalidinstanceid.notfound") ||
+    lower.includes("does not exist")
+  );
+}
+
+function isAWSTerminalInstanceState(state: string): boolean {
+  return state === "shutting-down" || state === "terminated";
+}
+
 function isAdminRoute(method: string, parts: string[]): boolean {
   if (method === "GET" && parts.join("/") === "v1/pool") {
     return true;
   }
   if (method === "GET" && parts.join("/") === "v1/admin/leases") {
+    return true;
+  }
+  if (method === "GET" && parts.join("/") === "v1/admin/lease-audit") {
     return true;
   }
   if (parts[0] === "v1" && parts[1] === "admin" && parts[2] === "leases" && Boolean(parts[3])) {
@@ -4697,6 +4988,7 @@ function uniqueNonEmpty(values: Array<string | undefined>): string[] {
 
 interface CloudProvider {
   listCrabboxServers(): Promise<ProviderMachine[]>;
+  getServer?(id: string): Promise<ProviderMachine>;
   createServerWithFallback(
     config: ReturnType<typeof leaseConfig>,
     leaseID: string,
@@ -4709,8 +5001,14 @@ interface CloudProvider {
     attempts?: ProvisioningAttempt[];
   }>;
   deleteServer(id: string): Promise<void>;
-  createImage(instanceID: string, name: string, noReboot: boolean): Promise<ProviderImage>;
-  getImage(imageID: string): Promise<ProviderImage>;
+  createImage(
+    instanceID: string,
+    name: string,
+    noReboot: boolean,
+    strategy: "image" | "disk-snapshot",
+  ): Promise<ProviderImage>;
+  getImage(imageID: string, kind?: string): Promise<ProviderImage>;
+  deleteImage(imageID: string, kind?: string): Promise<void>;
   deleteSSHKey(name: string): Promise<void>;
   hourlyPriceUSD(
     serverType: string,
@@ -4754,13 +5052,9 @@ class HetznerProvider implements CloudProvider {
     await this.client.deleteServer(Number(id));
   }
 
-  createImage(): Promise<ProviderImage> {
-    throw new Error("hetzner images are not supported");
-  }
-
-  getImage(): Promise<ProviderImage> {
-    throw new Error("hetzner images are not supported");
-  }
+  createImage = unsupportedProviderImageLifecycle("hetzner");
+  getImage = unsupportedProviderImageLifecycle("hetzner");
+  deleteImage = unsupportedProviderImageLifecycle("hetzner");
 
   async deleteSSHKey(name: string): Promise<void> {
     await this.client.deleteSSHKey(name);
@@ -4803,12 +5097,28 @@ class AzureProvider implements CloudProvider {
     return this.client.deleteServer(id);
   }
 
-  createImage(): Promise<ProviderImage> {
-    throw new Error("azure images are not supported");
+  createImage(
+    instanceID: string,
+    name: string,
+    _noReboot: boolean,
+    strategy: "image" | "disk-snapshot",
+  ): Promise<ProviderImage> {
+    if (strategy === "image") {
+      return Promise.reject(
+        new Error(
+          "Azure managed images require a stopped/generalized source VM; use disk-snapshot checkpoints for active Azure leases",
+        ),
+      );
+    }
+    return this.client.createDiskSnapshot(instanceID, name);
   }
 
-  getImage(): Promise<ProviderImage> {
-    throw new Error("azure images are not supported");
+  getImage(imageID: string, kind?: string): Promise<ProviderImage> {
+    return this.client.getImage(imageID, kind);
+  }
+
+  deleteImage(imageID: string, kind?: string): Promise<void> {
+    return this.client.deleteImage(imageID, kind);
   }
 
   async deleteSSHKey(): Promise<void> {
@@ -4849,12 +5159,23 @@ class GCPProvider implements CloudProvider {
     return this.client.deleteServer(id);
   }
 
-  createImage(): Promise<ProviderImage> {
-    throw new Error("gcp images are not supported");
+  createImage(
+    instanceID: string,
+    name: string,
+    _noReboot: boolean,
+    strategy: "image" | "disk-snapshot",
+  ): Promise<ProviderImage> {
+    return strategy === "image"
+      ? this.client.createImage(instanceID, name)
+      : this.client.createDiskSnapshot(instanceID, name);
   }
 
-  getImage(): Promise<ProviderImage> {
-    throw new Error("gcp images are not supported");
+  getImage(imageID: string, kind?: string): Promise<ProviderImage> {
+    return this.client.getImage(imageID, kind);
+  }
+
+  deleteImage(imageID: string, kind?: string): Promise<void> {
+    return this.client.deleteImage(imageID, kind);
   }
 
   deleteSSHKey(): Promise<void> {
@@ -4880,6 +5201,10 @@ class AWSProvider implements CloudProvider {
 
   listCrabboxServers(): Promise<ProviderMachine[]> {
     return this.client.listCrabboxServers();
+  }
+
+  getServer(id: string): Promise<ProviderMachine> {
+    return this.client.getServer(id);
   }
 
   async createServerWithFallback(
@@ -4966,12 +5291,23 @@ class AWSProvider implements CloudProvider {
     await this.client.deleteServer(id);
   }
 
-  createImage(instanceID: string, name: string, noReboot: boolean): Promise<ProviderImage> {
-    return this.client.createImage(instanceID, name, noReboot);
+  createImage(
+    instanceID: string,
+    name: string,
+    noReboot: boolean,
+    strategy: "image" | "disk-snapshot",
+  ): Promise<ProviderImage> {
+    return strategy === "image"
+      ? this.client.createImage(instanceID, name, noReboot)
+      : this.client.createDiskSnapshot(instanceID, name);
   }
 
   getImage(imageID: string): Promise<ProviderImage> {
     return this.client.getImage(imageID);
+  }
+
+  deleteImage(imageID: string): Promise<void> {
+    return this.client.deleteImage(imageID);
   }
 
   async deleteSSHKey(name: string): Promise<void> {

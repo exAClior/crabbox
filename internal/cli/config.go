@@ -32,6 +32,7 @@ type Config struct {
 	Image              string
 	AWSRegion          string
 	AWSAMI             string
+	AWSSnapshot        string
 	AWSSGID            string
 	AWSSubnetID        string
 	AWSProfile         string
@@ -44,6 +45,7 @@ type Config struct {
 	AzureLocation      string
 	AzureResourceGroup string
 	AzureImage         string
+	AzureSnapshot      string
 	AzureVNet          string
 	AzureSubnet        string
 	AzureNSG           string
@@ -55,6 +57,8 @@ type Config struct {
 	gcpZoneExplicit    bool
 	GCPImage           string
 	gcpImageExplicit   bool
+	GCPMachineImage    string
+	GCPSnapshot        string
 	GCPNetwork         string
 	gcpNetworkExplicit bool
 	GCPSubnet          string
@@ -1670,7 +1674,7 @@ func applyEnv(cfg *Config) {
 	cfg.AWSSGID = getenv("CRABBOX_AWS_SECURITY_GROUP_ID", cfg.AWSSGID)
 	cfg.AWSSubnetID = getenv("CRABBOX_AWS_SUBNET_ID", cfg.AWSSubnetID)
 	cfg.AWSProfile = getenv("CRABBOX_AWS_INSTANCE_PROFILE", cfg.AWSProfile)
-	cfg.AWSRootGB = int32(getenvInt("CRABBOX_AWS_ROOT_GB", int(cfg.AWSRootGB)))
+	cfg.AWSRootGB = getenvInt32("CRABBOX_AWS_ROOT_GB", cfg.AWSRootGB)
 	cfg.AWSMacHostID = getenv("CRABBOX_AWS_MAC_HOST_ID", cfg.AWSMacHostID)
 	if cidrs := os.Getenv("CRABBOX_AWS_SSH_CIDRS"); cidrs != "" {
 		cfg.AWSSSHCIDRs = splitCommaList(cidrs)
@@ -2141,6 +2145,18 @@ func getenvInt(name string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func getenvInt32(name string, fallback int32) int32 {
+	v := os.Getenv(name)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.ParseInt(v, 10, 32)
+	if err != nil {
+		return fallback
+	}
+	return int32(n)
 }
 
 func getenvFloat(name string, fallback float64) float64 {
