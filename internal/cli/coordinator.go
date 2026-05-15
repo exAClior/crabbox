@@ -123,6 +123,29 @@ type CoordinatorMachine struct {
 	Labels     map[string]string `json:"labels"`
 }
 
+type CoordinatorLeaseCloudAudit struct {
+	LeaseID         string `json:"leaseID"`
+	Slug            string `json:"slug,omitempty"`
+	Provider        string `json:"provider"`
+	State           string `json:"state"`
+	TargetOS        string `json:"target,omitempty"`
+	Owner           string `json:"owner"`
+	Org             string `json:"org"`
+	Region          string `json:"region,omitempty"`
+	CloudID         string `json:"cloudID"`
+	Host            string `json:"host,omitempty"`
+	ServerType      string `json:"serverType,omitempty"`
+	ExpiresAt       string `json:"expiresAt,omitempty"`
+	CleanupAttempts int    `json:"cleanupAttempts,omitempty"`
+	CleanupError    string `json:"cleanupError,omitempty"`
+	CleanupRetryAt  string `json:"cleanupRetryAt,omitempty"`
+	CloudStatus     string `json:"cloudStatus"`
+	CloudState      string `json:"cloudState,omitempty"`
+	CloudHost       string `json:"cloudHost,omitempty"`
+	CloudServerType string `json:"cloudServerType,omitempty"`
+	Message         string `json:"message,omitempty"`
+}
+
 type CoordinatorUsageResponse struct {
 	Usage  CoordinatorUsageSummary `json:"usage"`
 	Limits CoordinatorCostLimits   `json:"limits"`
@@ -145,8 +168,19 @@ type CoordinatorImage struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	State      string `json:"state"`
+	Provider   string `json:"provider,omitempty"`
+	Kind       string `json:"kind,omitempty"`
 	Region     string `json:"region,omitempty"`
+	Project    string `json:"project,omitempty"`
+	ResourceID string `json:"resourceID,omitempty"`
 	PromotedAt string `json:"promotedAt,omitempty"`
+}
+
+type CoordinatorImageRef struct {
+	Provider string
+	Region   string
+	Project  string
+	Kind     string
 }
 
 type CoordinatorGitHubLoginStart struct {
@@ -512,6 +546,7 @@ func (c *CoordinatorClient) CreateLease(ctx context.Context, cfg Config, publicK
 		"image":                           cfg.Image,
 		"awsRegion":                       cfg.AWSRegion,
 		"awsAMI":                          cfg.AWSAMI,
+		"awsSnapshot":                     cfg.AWSSnapshot,
 		"awsSGID":                         cfg.AWSSGID,
 		"awsSubnetID":                     cfg.AWSSubnetID,
 		"awsProfile":                      cfg.AWSProfile,
@@ -520,6 +555,7 @@ func (c *CoordinatorClient) CreateLease(ctx context.Context, cfg Config, publicK
 		"awsMacHostID":                    cfg.AWSMacHostID,
 		"azureLocation":                   cfg.AzureLocation,
 		"azureImage":                      cfg.AzureImage,
+		"azureSnapshot":                   cfg.AzureSnapshot,
 		"sshUser":                         cfg.SSHUser,
 		"sshPort":                         cfg.SSHPort,
 		"sshFallbackPorts":                cfg.SSHFallbackPorts,
@@ -551,6 +587,12 @@ func addCoordinatorGCPFields(req map[string]any, cfg Config) {
 	}
 	if cfg.GCPImage != "" && (cfg.gcpImageExplicit || cfg.GCPImage != base.GCPImage) {
 		req["gcpImage"] = cfg.GCPImage
+	}
+	if cfg.GCPMachineImage != "" {
+		req["gcpMachineImage"] = cfg.GCPMachineImage
+	}
+	if cfg.GCPSnapshot != "" {
+		req["gcpSnapshot"] = cfg.GCPSnapshot
 	}
 	if cfg.GCPNetwork != "" && (cfg.gcpNetworkExplicit || cfg.GCPNetwork != base.GCPNetwork) {
 		req["gcpNetwork"] = cfg.GCPNetwork
@@ -827,6 +869,34 @@ func (c *CoordinatorClient) AdminLeases(ctx context.Context, state, owner, org s
 	return res.Leases, err
 }
 
+func (c *CoordinatorClient) AdminLeaseAudit(ctx context.Context, state, provider, owner, org string, limit int) ([]CoordinatorLeaseCloudAudit, error) {
+	var res struct {
+		Audits []CoordinatorLeaseCloudAudit `json:"audits"`
+	}
+	values := url.Values{}
+	if state != "" {
+		values.Set("state", state)
+	}
+	if provider != "" {
+		values.Set("provider", provider)
+	}
+	if owner != "" {
+		values.Set("owner", owner)
+	}
+	if org != "" {
+		values.Set("org", org)
+	}
+	if limit > 0 {
+		values.Set("limit", strconv.Itoa(limit))
+	}
+	path := "/v1/admin/lease-audit"
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	err := c.do(ctx, http.MethodGet, path, nil, &res)
+	return res.Audits, err
+}
+
 func (c *CoordinatorClient) AdminReleaseLease(ctx context.Context, id string, deleteServer bool) (CoordinatorLease, error) {
 	var res struct {
 		Lease CoordinatorLease `json:"lease"`
@@ -843,32 +913,67 @@ func (c *CoordinatorClient) AdminDeleteLease(ctx context.Context, id string) (Co
 	return res.Lease, err
 }
 
-func (c *CoordinatorClient) CreateImage(ctx context.Context, leaseID, name string, noReboot bool) (CoordinatorImage, error) {
+func (c *CoordinatorClient) CreateImage(ctx context.Context, leaseID, name string, noReboot bool, strategies ...string) (CoordinatorImage, error) {
 	var res struct {
 		Image CoordinatorImage `json:"image"`
 	}
-	err := c.do(ctx, http.MethodPost, "/v1/images", map[string]any{
+	req := map[string]any{
 		"leaseID":  leaseID,
 		"name":     name,
 		"noReboot": noReboot,
-	}, &res)
+	}
+	if len(strategies) > 0 && strings.TrimSpace(strategies[0]) != "" {
+		req["strategy"] = strings.TrimSpace(strategies[0])
+	}
+	err := c.do(ctx, http.MethodPost, "/v1/images", req, &res)
 	return res.Image, err
 }
 
-func (c *CoordinatorClient) Image(ctx context.Context, imageID string) (CoordinatorImage, error) {
+func (c *CoordinatorClient) Image(ctx context.Context, imageID string, refs ...CoordinatorImageRef) (CoordinatorImage, error) {
 	var res struct {
 		Image CoordinatorImage `json:"image"`
 	}
-	err := c.do(ctx, http.MethodGet, "/v1/images/"+url.PathEscape(imageID), nil, &res)
+	err := c.do(ctx, http.MethodGet, imagePath(imageID, "", refs...), nil, &res)
 	return res.Image, err
 }
 
-func (c *CoordinatorClient) PromoteImage(ctx context.Context, imageID string) (CoordinatorImage, error) {
+func (c *CoordinatorClient) PromoteImage(ctx context.Context, imageID string, refs ...CoordinatorImageRef) (CoordinatorImage, error) {
 	var res struct {
 		Image CoordinatorImage `json:"image"`
 	}
-	err := c.do(ctx, http.MethodPost, "/v1/images/"+url.PathEscape(imageID)+"/promote", map[string]any{}, &res)
+	err := c.do(ctx, http.MethodPost, imagePath(imageID, "promote", refs...), map[string]any{}, &res)
 	return res.Image, err
+}
+
+func (c *CoordinatorClient) DeleteImage(ctx context.Context, imageID string, refs ...CoordinatorImageRef) error {
+	return c.do(ctx, http.MethodDelete, imagePath(imageID, "", refs...), nil, nil)
+}
+
+func imagePath(imageID, action string, refs ...CoordinatorImageRef) string {
+	path := "/v1/images/" + url.PathEscape(imageID)
+	if action != "" {
+		path += "/" + url.PathEscape(action)
+	}
+	values := url.Values{}
+	if len(refs) > 0 {
+		ref := refs[0]
+		if strings.TrimSpace(ref.Provider) != "" {
+			values.Set("provider", strings.TrimSpace(ref.Provider))
+		}
+		if strings.TrimSpace(ref.Region) != "" {
+			values.Set("region", strings.TrimSpace(ref.Region))
+		}
+		if strings.TrimSpace(ref.Project) != "" {
+			values.Set("project", strings.TrimSpace(ref.Project))
+		}
+		if strings.TrimSpace(ref.Kind) != "" {
+			values.Set("kind", strings.TrimSpace(ref.Kind))
+		}
+	}
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	return path
 }
 
 func (c *CoordinatorClient) CreateRun(ctx context.Context, leaseID string, cfg Config, command []string) (CoordinatorRun, error) {

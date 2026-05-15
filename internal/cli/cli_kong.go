@@ -34,10 +34,11 @@ type crabboxKongCLI struct {
 	List       listKongCmd       `cmd:"" passthrough:"" help:"List Crabbox machines."`
 	Share      shareKongCmd      `cmd:"" passthrough:"" help:"Share a lease with users or the owning org."`
 	Unshare    unshareKongCmd    `cmd:"" passthrough:"" help:"Remove lease sharing."`
-	Image      imageKongCmd      `cmd:"" help:"Create or promote brokered AWS runner images."`
+	Image      imageKongCmd      `cmd:"" help:"Create provider images and promote brokered AWS runner images."`
 	Usage      usageKongCmd      `cmd:"" passthrough:"" help:"Show cost and usage estimates by user, org, or fleet."`
 	Admin      adminKongCmd      `cmd:"" help:"Lease admin controls for trusted operators."`
 	Actions    actionsKongCmd    `cmd:"" help:"Register GitHub Actions runners or dispatch workflows."`
+	Checkpoint checkpointKongCmd `cmd:"" help:"Create, restore, and fork VM or workspace checkpoints."`
 	Ssh        sshKongCmd        `cmd:"" name:"ssh" passthrough:"" help:"Print the SSH command for a lease."`
 	Vnc        vncKongCmd        `cmd:"" name:"vnc" passthrough:"" help:"Print or open VNC connection details for a desktop lease."`
 	Webvnc     webvncKongCmd     `cmd:"" name:"webvnc" passthrough:"" help:"Bridge a desktop lease into the authenticated web portal."`
@@ -64,7 +65,7 @@ func (a App) runKong(ctx context.Context, args []string) (err error) {
 	parser, err := kong.New(&cli,
 		kong.Name("crabbox"),
 		kong.Description("Crabbox leases remote test boxes, syncs your dirty checkout, runs commands, and cleans up."),
-		kong.Vars{"version": version},
+		kong.Vars{"version": currentVersion()},
 		kong.Writers(a.Stdout, a.Stderr),
 		kong.Exit(func(code int) {
 			panic(kongExit{code: code})
@@ -114,7 +115,7 @@ func normalizeKongHelpArgs(args []string) []string {
 
 func isKongCommandGroup(command string) bool {
 	switch command {
-	case "actions", "admin", "artifacts", "azure", "cache", "config", "desktop", "image", "job", "machine", "media", "pool":
+	case "actions", "admin", "artifacts", "azure", "cache", "checkpoint", "config", "desktop", "image", "job", "machine", "media", "pool":
 		return true
 	default:
 		return false
@@ -305,8 +306,9 @@ type cacheWarmKongCmd struct {
 }
 
 type imageKongCmd struct {
-	Create  imageCreateKongCmd  `cmd:"" passthrough:"" help:"Create an AMI from a brokered AWS lease."`
+	Create  imageCreateKongCmd  `cmd:"" passthrough:"" help:"Create a provider image from a brokered lease."`
 	Promote imagePromoteKongCmd `cmd:"" passthrough:"" help:"Promote an AMI for brokered AWS runners."`
+	Delete  imageDeleteKongCmd  `cmd:"" passthrough:"" help:"Delete a provider image."`
 }
 type imageCreateKongCmd struct {
 	Args []string `arg:"" optional:""`
@@ -314,13 +316,20 @@ type imageCreateKongCmd struct {
 type imagePromoteKongCmd struct {
 	Args []string `arg:"" optional:""`
 }
+type imageDeleteKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
 
 type adminKongCmd struct {
-	Leases  adminLeasesKongCmd  `cmd:"" passthrough:"" help:"List coordinator lease records."`
-	Release adminReleaseKongCmd `cmd:"" passthrough:"" help:"Mark a lease released."`
-	Delete  adminDeleteKongCmd  `cmd:"" passthrough:"" help:"Delete the backing server and mark the lease released."`
+	Leases     adminLeasesKongCmd     `cmd:"" passthrough:"" help:"List coordinator lease records."`
+	LeaseAudit adminLeaseAuditKongCmd `cmd:"" name:"lease-audit" passthrough:"" help:"Check expired coordinator leases against cloud provider state."`
+	Release    adminReleaseKongCmd    `cmd:"" passthrough:"" help:"Mark a lease released."`
+	Delete     adminDeleteKongCmd     `cmd:"" passthrough:"" help:"Delete the backing server and mark the lease released."`
 }
 type adminLeasesKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
+type adminLeaseAuditKongCmd struct {
 	Args []string `arg:"" optional:""`
 }
 type adminReleaseKongCmd struct {
@@ -342,6 +351,33 @@ type actionsRegisterKongCmd struct {
 	Args []string `arg:"" optional:""`
 }
 type actionsDispatchKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
+
+type checkpointKongCmd struct {
+	Create  checkpointCreateKongCmd  `cmd:"" passthrough:"" help:"Create a VM or workspace checkpoint from a lease."`
+	List    checkpointListKongCmd    `cmd:"" passthrough:"" help:"List local checkpoints."`
+	Inspect checkpointInspectKongCmd `cmd:"" passthrough:"" help:"Inspect checkpoint metadata."`
+	Restore checkpointRestoreKongCmd `cmd:"" passthrough:"" help:"Restore a checkpoint onto an existing lease."`
+	Fork    checkpointForkKongCmd    `cmd:"" passthrough:"" help:"Lease a new box from a checkpoint."`
+	Delete  checkpointDeleteKongCmd  `cmd:"" passthrough:"" help:"Delete a checkpoint and provider snapshot."`
+}
+type checkpointCreateKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
+type checkpointListKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
+type checkpointInspectKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
+type checkpointRestoreKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
+type checkpointForkKongCmd struct {
+	Args []string `arg:"" optional:""`
+}
+type checkpointDeleteKongCmd struct {
 	Args []string `arg:"" optional:""`
 }
 
@@ -479,9 +515,15 @@ func (c *imageCreateKongCmd) Run(ctx context.Context, app App) error {
 func (c *imagePromoteKongCmd) Run(ctx context.Context, app App) error {
 	return app.imagePromote(ctx, c.Args)
 }
+func (c *imageDeleteKongCmd) Run(ctx context.Context, app App) error {
+	return app.imageDelete(ctx, c.Args)
+}
 
 func (c *adminLeasesKongCmd) Run(ctx context.Context, app App) error {
 	return app.adminLeases(ctx, c.Args)
+}
+func (c *adminLeaseAuditKongCmd) Run(ctx context.Context, app App) error {
+	return app.adminLeaseAudit(ctx, c.Args)
 }
 func (c *adminReleaseKongCmd) Run(ctx context.Context, app App) error {
 	return app.adminRelease(ctx, c.Args)
@@ -498,6 +540,25 @@ func (c *actionsRegisterKongCmd) Run(ctx context.Context, app App) error {
 }
 func (c *actionsDispatchKongCmd) Run(ctx context.Context, app App) error {
 	return app.actionsDispatch(ctx, c.Args)
+}
+
+func (c *checkpointCreateKongCmd) Run(ctx context.Context, app App) error {
+	return app.checkpointCreate(ctx, stripKongCommandPath(c.Args, "checkpoint", "create"))
+}
+func (c *checkpointListKongCmd) Run(ctx context.Context, app App) error {
+	return app.checkpointList(stripKongCommandPath(c.Args, "checkpoint", "list"))
+}
+func (c *checkpointInspectKongCmd) Run(ctx context.Context, app App) error {
+	return app.checkpointInspect(stripKongCommandPath(c.Args, "checkpoint", "inspect"))
+}
+func (c *checkpointRestoreKongCmd) Run(ctx context.Context, app App) error {
+	return app.checkpointRestore(ctx, stripKongCommandPath(c.Args, "checkpoint", "restore"))
+}
+func (c *checkpointForkKongCmd) Run(ctx context.Context, app App) error {
+	return app.checkpointFork(ctx, stripKongCommandPath(c.Args, "checkpoint", "fork"))
+}
+func (c *checkpointDeleteKongCmd) Run(ctx context.Context, app App) error {
+	return app.checkpointDelete(stripKongCommandPath(c.Args, "checkpoint", "delete"))
 }
 
 func (c *configPathKongCmd) Run(ctx context.Context, app App) error {
@@ -527,7 +588,7 @@ func (c *machineCleanupKongCmd) Run(ctx context.Context, app App) error {
 }
 
 func (c *versionKongCmd) Run(app App) error {
-	fmt.Fprintln(app.Stdout, version)
+	fmt.Fprintln(app.Stdout, currentVersion())
 	return nil
 }
 

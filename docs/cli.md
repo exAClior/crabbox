@@ -72,12 +72,19 @@ crabbox cache warm --id <lease-id-or-slug> -- <command...>
 crabbox actions hydrate --id <lease-id-or-slug> [--provider <provider>] [--target linux|macos|windows] [--windows-mode normal|wsl2] [--workflow <file|name|id>] [--job <name>] [--wait-timeout <duration>] [--timing-json]
 crabbox actions register --id <lease-id-or-slug> [--provider <provider>] [--target linux|macos|windows] [--windows-mode normal|wsl2] [--repo owner/name]
 crabbox actions dispatch [--workflow <file|name|id>] [-f key=value]
+crabbox checkpoint create --id <lease-id-or-slug> [--name <name>] [--mode auto|native|archive] [--workdir <path>]
+crabbox checkpoint list [--json]
+crabbox checkpoint inspect <checkpoint-id> [--json]
+crabbox checkpoint restore <checkpoint-id> --id <lease-id-or-slug> [--clear=false]
+crabbox checkpoint fork <checkpoint-id> [--class <class>] [--keep]
+crabbox checkpoint delete <checkpoint-id> [--local-only]
 crabbox status --id <lease-id-or-slug> [--network auto|tailscale|public] [--wait]
 crabbox list [--json]
 crabbox share --id <lease-id-or-slug> [--user <email>] [--org] [--role use|manage] [--list] [--json]
 crabbox unshare --id <lease-id-or-slug> [--user <email>] [--org] [--all] [--json]
 crabbox usage [--scope user|org|all] [--user <email>] [--org <name>] [--month YYYY-MM] [--json]
 crabbox admin leases [--state active|released|expired|failed] [--owner <email>] [--org <name>] [--json]
+crabbox admin lease-audit [--state expired] [--provider aws] [--fail-on-live] [--json]
 crabbox admin release <lease-id-or-slug> [--delete]
 crabbox admin delete <lease-id-or-slug> --force
 crabbox ssh --id <lease-id-or-slug> [--network auto|tailscale|public]
@@ -147,6 +154,14 @@ crabbox warmup
 crabbox actions hydrate --id blue-lobster
 crabbox run --id blue-lobster -- pnpm test:changed
 crabbox stop blue-lobster
+```
+
+Save and fork a prepared workspace:
+
+```sh
+crabbox run --id blue-lobster --shell 'npm ci && npm test'
+crabbox checkpoint create --id blue-lobster --name after-npm-ci
+crabbox checkpoint fork chk_123 --class beast
 ```
 
 Use Blacksmith Testboxes through the same Crabbox surface:
@@ -262,6 +277,7 @@ Trusted operator lease controls:
 
 ```sh
 crabbox admin leases --state active
+crabbox admin lease-audit --state expired --provider aws --fail-on-live
 crabbox admin release blue-lobster
 crabbox admin delete cbx_abcdef123456 --force
 ```
@@ -271,6 +287,7 @@ Trusted operator image controls:
 ```sh
 crabbox image create --id cbx_abcdef123456 --name openclaw-crabbox-20260501-1246 --wait
 crabbox image promote ami-1234567890abcdef0
+crabbox image delete ami-1234567890abcdef0 --region eu-west-1
 ```
 
 ## `run`

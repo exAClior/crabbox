@@ -58,7 +58,7 @@ participate in Crabbox lease expiry, cleanup, or cost accounting.
 
 ## Cleanup
 
-Brokered cleanup is owned by the Durable Object alarm. `crabbox cleanup` refuses to run when a coordinator is configured, because sweeping provider resources behind the coordinator can delete live leases.
+Brokered cleanup is owned by the Durable Object alarm. `crabbox cleanup` refuses to run when a coordinator is configured, because sweeping provider resources behind the coordinator can delete live leases. When provider deletion fails during TTL cleanup, the coordinator keeps the lease active with cleanup retry metadata and schedules another alarm instead of marking the lease expired while the machine may still exist.
 
 Direct cleanup only deletes machines that are clearly safe:
 
@@ -67,6 +67,8 @@ Direct cleanup only deletes machines that are clearly safe:
 - expired ready/leased/active direct machines can be cleaned up manually;
 - expired inactive machines can be deleted;
 - stale active states older than expiry plus 12 hours can be deleted.
+
+Direct AWS security-group maintenance also prunes Crabbox-owned SSH ingress rules before adding the current source CIDRs, including old fallback ports that are no longer configured. It leaves non-Crabbox rules untouched.
 
 ## Cost Control
 

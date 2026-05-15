@@ -2,20 +2,30 @@
 
 ## 0.13.1 - Unreleased
 
+### Added
+
+- Added `crabbox admin lease-audit` so operators can compare expired brokered AWS lease records against live cloud instance state and fail automation when a record still maps to a live instance.
+- Added `crabbox checkpoint` native disk-snapshot checkpoints for brokered AWS, Azure, and GCP Linux leases, optional provider image checkpoints via `--strategy image`, local workspace archives for generic POSIX SSH leases, inspect/list/delete flows, archive restore, and checkpoint forks into fresh leases.
+- Added brokered provider snapshot/image deletion for AWS EBS snapshots and AMIs, Azure managed disk snapshots and managed images, and GCP disk snapshots and machine images.
+
+### Changed
+
+- Improved checkpoint documentation with clearer native vs archive distinction, workflow mechanics, security warnings, and command reference examples.
+
 ### Fixed
 
-- Fixed Hetzner Cloud server-list parsing: `private_net` is returned by the
-  API as an array of network attachments (per Hetzner's documented schema),
-  but `Server.PrivateNet` was modeled as a struct, causing every Hetzner
-  command (`list`, `doctor`, `warmup`, `run --id ...`) to fail with
-  `json: cannot unmarshal array into Go struct field Server.servers.private_net ...`
-  as soon as any server existed in the account. Promoted `PrivateNet` to a
-  named type with a best-effort `UnmarshalJSON` that accepts both Hetzner's
-  array shape (lifts the first attachment's `ip` into `PrivateNet.IPv4.IP`)
-  and the legacy struct shape used elsewhere. Azure / Proxmox callers are
-  unaffected — they set the field via direct assignment. Regression tests
-  cover empty array, attached array, legacy struct, and null/omitted shapes.
-
+- Fixed Code bridge upstream URL handling so browser-controlled paths cannot select a non-loopback upstream target, and clamped `CRABBOX_AWS_ROOT_GB` parsing to valid `int32` values.
+- Fixed `crabbox admin lease-audit --fail-on-live` so recently terminated AWS instances returned by `DescribeInstances` do not fail cleanup automation as live resources.
+- Fixed Islo exec-upload fallback cleanup so failed archive decodes or extracts still remove temporary upload files. Thanks @stainlu.
+- Fixed coordinator TTL cleanup so provider deletion failures keep leases active with retry metadata instead of silently expiring while cloud instances continue running.
+- Fixed direct AWS security-group maintenance so stale Crabbox-owned SSH ingress rules are pruned before adding the current source CIDRs.
+- Fixed E2B sync cleanup so remote upload archives are removed even when extraction fails. Thanks @stainlu.
+- Fixed Hetzner Cloud server-list parsing so `private_net` arrays from the API no longer break list, doctor, warmup, or reused-run flows. Thanks @muqsitnawaz.
+- Fixed installed tagged builds so `crabbox --version` and proof metadata report the Go module build version instead of the development fallback. Thanks @stainlu.
+- Fixed Modal sync cleanup so remote upload archives are removed even when extraction fails. Thanks @stainlu.
+- Fixed native provider checkpoint creation so AWS, Azure, and GCP snapshot/image checkpoints flush source filesystem writes before calling the provider API.
+- Fixed Tensorlake timing JSON so delegated runs include the lease slug and reused sandboxes preserve the stored claim slug. Thanks @stainlu.
+- Fixed Tensorlake workdir validation so broad sandbox paths are rejected before sync or command execution. Thanks @stainlu.
 ## 0.13.0 - 2026-05-13
 
 ### Added
