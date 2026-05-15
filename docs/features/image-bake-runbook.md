@@ -195,6 +195,28 @@ If dry-run reports `UnauthorizedOperation`, update the coordinator AWS identity
 with the EC2 Mac host lifecycle policy in [admin](../commands/admin.md#mac-hosts)
 before doing the real allocation.
 
+For an end-to-end guarded run, use the repository smoke script:
+
+```bash
+scripts/macos-image-lifecycle-smoke.sh
+```
+
+By default it only runs host offering/list/dry-run checks and stops before paid
+allocation. After the dry-run succeeds, opt in to the paid lifecycle explicitly:
+
+```bash
+CRABBOX_MACOS_ALLOCATE=1 \
+CRABBOX_MACOS_PROMOTE=1 \
+scripts/macos-image-lifecycle-smoke.sh
+```
+
+The script warms a macOS desktop lease, verifies SSH/sync/VNC prerequisites,
+starts WebVNC, collects desktop artifacts, creates a candidate AMI, boots and
+smokes the candidate, then promotes and smokes the promoted image when
+`CRABBOX_MACOS_PROMOTE=1`. EC2 Mac Dedicated Hosts have provider-side billing
+and release constraints; the script stops leases by default but releases the
+host only when `CRABBOX_MACOS_RELEASE_HOST=1`.
+
 ```bash
 crabbox admin mac-hosts allocate \
   --region eu-west-1 \
