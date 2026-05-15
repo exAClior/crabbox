@@ -113,7 +113,7 @@ Conditional Worker secrets and settings:
 
 ```text
 AWS_SESSION_TOKEN optional
-CRABBOX_AWS_MAC_HOST_ID required only for brokered target=macos
+CRABBOX_AWS_MAC_HOST_ID optional; pins a brokered EC2 Mac Dedicated Host
 CRABBOX_SHARED_OWNER optional fixed owner identity for shared-token automation
 CRABBOX_ADMIN_TOKEN required for admin routes and image promotion
 CRABBOX_GITHUB_CLIENT_ID required for browser login

@@ -202,7 +202,7 @@ Brokered AWS credentials live as Worker secrets:
 AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY
 AWS_SESSION_TOKEN optional
-CRABBOX_AWS_MAC_HOST_ID optional; required only for brokered target=macos
+CRABBOX_AWS_MAC_HOST_ID optional; pins a brokered EC2 Mac Dedicated Host
 ```
 
 Direct fallback env is whatever the AWS SDK can resolve, such as:
@@ -224,7 +224,7 @@ CRABBOX_AWS_SUBNET_ID            optional subnet override
 CRABBOX_AWS_INSTANCE_PROFILE     optional IAM instance profile name
 CRABBOX_AWS_ROOT_GB              default 400
 CRABBOX_AWS_SSH_CIDRS            optional comma-separated SSH source CIDRs
-CRABBOX_AWS_MAC_HOST_ID          EC2 Mac Dedicated Host id for target=macos
+CRABBOX_AWS_MAC_HOST_ID          optional EC2 Mac Dedicated Host id for target=macos; required for direct AWS
 CRABBOX_SSH_FALLBACK_PORTS       optional comma-separated SSH fallback ports, or none
 ```
 
@@ -384,7 +384,7 @@ HETZNER_TOKEN
 AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY
 AWS_SESSION_TOKEN optional
-CRABBOX_AWS_MAC_HOST_ID optional; required only for brokered target=macos
+CRABBOX_AWS_MAC_HOST_ID optional; pins a brokered EC2 Mac Dedicated Host
 CRABBOX_SHARED_TOKEN
 CRABBOX_ADMIN_TOKEN optional; required for admin routes and image promotion
 CRABBOX_GITHUB_CLIENT_ID

@@ -189,7 +189,7 @@ crabbox warmup --provider aws --target windows --desktop
 crabbox warmup --provider azure --target windows --desktop
 crabbox warmup --provider aws --target windows --windows-mode wsl2
 crabbox warmup --provider azure --target windows --windows-mode wsl2
-CRABBOX_AWS_MAC_HOST_ID=h-... crabbox warmup --provider aws --target macos --desktop --market on-demand
+crabbox warmup --provider aws --target macos --desktop --market on-demand
 crabbox vnc --id blue-lobster
 crabbox screenshot --id blue-lobster --output desktop.png
 ```
@@ -202,8 +202,10 @@ Managed provider targets are intentionally narrow:
   (`--target windows --windows-mode wsl2`) for POSIX sync, run, and Actions
   hydration. Use native Windows for desktop/VNC; use WSL2 for Linux tooling on
   a Windows host.
-- AWS also supports EC2 Mac (`--target macos`) when the Mac Dedicated Host is
-  provided. Azure does not have a managed macOS target.
+- AWS also supports EC2 Mac (`--target macos`) when an available Mac Dedicated
+  Host exists in the selected region. Brokered mode can discover an available
+  host; direct mode requires `CRABBOX_AWS_MAC_HOST_ID` or `aws.macHostId`.
+  Azure does not have a managed macOS target.
 - Existing macOS and Windows machines belong on `provider=ssh`.
 
 Use Tailscale as an optional network plane:

@@ -18,7 +18,7 @@ debugging.
 | Linux | Yes | Spot by default; On-Demand optional; cloud-init bootstrap. |
 | Windows native | Yes | EC2Launch, OpenSSH, Git for Windows, TightVNC, archive sync, first-network flyout suppression. |
 | Windows WSL2 | Yes | Nested virtualization on C8i/M8i/R8i families; POSIX sync through WSL. |
-| macOS | Yes | EC2 Mac Dedicated Host id required; On-Demand only. |
+| macOS | Yes | Requires an available EC2 Mac Dedicated Host; brokered mode can discover one, direct mode requires a host id. On-Demand only. |
 
 Examples:
 
@@ -27,7 +27,7 @@ crabbox warmup --provider aws --class beast
 crabbox run --provider aws --class beast --market on-demand -- pnpm check
 crabbox warmup --provider aws --target windows --desktop
 crabbox warmup --provider aws --target windows --windows-mode wsl2
-CRABBOX_AWS_MAC_HOST_ID=h-... crabbox warmup --provider aws --target macos --desktop --market on-demand
+crabbox warmup --provider aws --target macos --desktop --market on-demand
 ```
 
 ## Capacity
@@ -102,7 +102,7 @@ Worker secrets:
 AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY
 AWS_SESSION_TOKEN optional
-CRABBOX_AWS_MAC_HOST_ID optional; required for brokered target=macos
+CRABBOX_AWS_MAC_HOST_ID optional; pins a brokered EC2 Mac Dedicated Host
 ```
 
 CLI/direct env and config:

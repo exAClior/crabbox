@@ -23,8 +23,7 @@ crabbox warmup --provider aws --target windows --desktop
 crabbox warmup --provider azure --target windows --desktop
 crabbox vnc --id crimson-crab
 
-CRABBOX_AWS_MAC_HOST_ID=h-... \
-  crabbox warmup --provider aws --target macos --desktop --market on-demand
+crabbox warmup --provider aws --target macos --desktop --market on-demand
 crabbox vnc --id silver-squid
 ```
 
@@ -152,7 +151,7 @@ host's VNC or Screen Sharing prompt.
 | Azure Linux | Yes | Requires `--desktop`; same Linux desktop profile. |
 | AWS Windows | Yes | Requires `--target windows --desktop`; installs Git for Windows and TightVNC after EC2Launch enables OpenSSH. Spot or On-Demand follows the AWS capacity config. |
 | Azure Windows | Yes | Requires `--target windows --desktop`; installs Git for Windows and TightVNC after Custom Script Extension enables OpenSSH. Capacity follows the Azure class/SKU config. |
-| AWS macOS | Yes | Requires `--target macos --desktop --market on-demand` plus `CRABBOX_AWS_MAC_HOST_ID` or `aws.macHostId`. |
+| AWS macOS | Yes | Requires `--target macos --desktop --market on-demand` plus an available EC2 Mac Dedicated Host. Brokered mode can discover a host; direct mode requires `CRABBOX_AWS_MAC_HOST_ID` or `aws.macHostId`. |
 | Static Linux | Host-managed | Requires an existing loopback VNC service on the host. |
 | Static macOS | Host-managed | Uses existing Screen Sharing or VNC. |
 | Static Windows | Host-managed | Uses an existing VNC server. |
@@ -229,8 +228,10 @@ The command captures from the logged-in console session using a scheduled task.
 
 macOS launch fails with missing host id
 
-Set `CRABBOX_AWS_MAC_HOST_ID` or `aws.macHostId`, use `--market on-demand`, and
-make sure the Dedicated Host is allocated in the selected AWS region.
+Use `--market on-demand` and make sure an available EC2 Mac Dedicated Host is
+allocated in the selected AWS region. Set `CRABBOX_AWS_MAC_HOST_ID` or
+`aws.macHostId` only when you want to pin a specific host, or when running the
+direct AWS provider.
 
 ## Flags
 

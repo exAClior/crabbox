@@ -74,8 +74,8 @@ modal      Modal Sandboxes with delegated command execution
 - launches AWS Windows Server desktop leases with EC2Launch PowerShell user
   data, OpenSSH, Git for Windows, TightVNC, and first-network flyout
   suppression when `target=windows`;
-- launches EC2 Mac leases only with an explicit Dedicated Host id
-  (`CRABBOX_AWS_MAC_HOST_ID` or `aws.macHostId`) and On-Demand capacity;
+- launches EC2 Mac leases on available Dedicated Hosts with On-Demand capacity,
+  optionally pinned by `CRABBOX_AWS_MAC_HOST_ID` or `aws.macHostId`;
 - tags instances, volumes, and Spot requests;
 - falls back across broad C/M/R instance families for class requests, including account policy and capacity rejections;
 - can fall back to a small burstable type when account policy rejects the high-core class candidates;
