@@ -212,15 +212,23 @@ scripts/macos-image-lifecycle-smoke.sh
 ```
 
 The script warms a macOS desktop lease, verifies SSH/sync/VNC prerequisites,
-starts WebVNC, collects desktop artifacts, creates a candidate AMI, boots and
-smokes the candidate, then promotes and smokes the promoted image when
-`CRABBOX_MACOS_PROMOTE=1`. EC2 Mac Dedicated Hosts have provider-side billing
-and release constraints; the script stops leases by default but releases the
-host only when `CRABBOX_MACOS_RELEASE_HOST=1`.
+starts WebVNC, collects desktop artifacts, creates a candidate AMI with a
+rebooting image capture, boots and smokes the candidate, then promotes and
+smokes the promoted image when `CRABBOX_MACOS_PROMOTE=1`. EC2 Mac Dedicated
+Hosts have provider-side billing and release constraints; the script stops
+leases by default, waits for the host to return to `available` between macOS
+boots, and releases the host only when `CRABBOX_MACOS_RELEASE_HOST=1`.
 
 If an available EC2 Mac Dedicated Host already exists, the script still stops
 after preflight unless `CRABBOX_MACOS_RUN=1` or `CRABBOX_MACOS_ALLOCATE=1` is
 set.
+
+Stopping or terminating an EC2 Mac instance starts the AWS host scrubbing
+workflow. The script waits up to `CRABBOX_MACOS_HOST_WAIT_TIMEOUT` before each
+next macOS boot; the default is `5h` because Apple silicon scrubbing can take
+up to 4.5 hours. Override `CRABBOX_MACOS_HOST_WAIT_INTERVAL` to change the poll
+interval. If the host existed before the script started, `CRABBOX_MACOS_RELEASE_HOST=1`
+will not release it unless `CRABBOX_MACOS_RELEASE_EXISTING_HOST=1` is also set.
 
 ```bash
 crabbox admin mac-hosts allocate \

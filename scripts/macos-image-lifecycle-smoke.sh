@@ -10,6 +10,8 @@ image_name="${CRABBOX_MACOS_IMAGE_NAME:-crabbox-macos-arm64-$(date -u +%Y%m%d-%H
 ttl="${CRABBOX_MACOS_TTL:-2h}"
 idle_timeout="${CRABBOX_MACOS_IDLE_TIMEOUT:-30m}"
 image_wait_timeout="${CRABBOX_MACOS_IMAGE_WAIT_TIMEOUT:-60m}"
+host_wait_timeout="${CRABBOX_MACOS_HOST_WAIT_TIMEOUT:-5h}"
+host_wait_interval="${CRABBOX_MACOS_HOST_WAIT_INTERVAL:-2m}"
 allocate="${CRABBOX_MACOS_ALLOCATE:-0}"
 run_existing="${CRABBOX_MACOS_RUN:-0}"
 create_image="${CRABBOX_MACOS_CREATE_IMAGE:-1}"
@@ -23,6 +25,7 @@ source_lease=""
 candidate_lease=""
 promoted_lease=""
 allocated_host=""
+host_allocated_by_script=0
 
 run() {
   printf '+'
@@ -69,6 +72,56 @@ for (const line of text.trim().split(/\n/).reverse()) {
 }
 process.exit(1);
 ' "$1"
+}
+
+duration_seconds() {
+  local value="$1"
+  local number
+  case "$value" in
+    *h) number="${value%h}";;
+    *m) number="${value%m}";;
+    *s) number="${value%s}";;
+    *) number="$value";;
+  esac
+  if [[ ! "$number" =~ ^[0-9]+$ ]]; then
+    printf 'invalid duration: %s\n' "$value" >&2
+    exit 2
+  fi
+  case "$value" in
+    *h) printf '%s\n' "$((number * 3600))";;
+    *m) printf '%s\n' "$((number * 60))";;
+    *s | *) printf '%s\n' "$number";;
+  esac
+}
+
+mac_host_state() {
+  local host="$1"
+  "$CRABBOX_BIN" admin mac-hosts list --region "$region" --type "$instance_type" --json |
+    jq -r --arg host "$host" '[.[] | select(.id == $host) | .state][0] // empty'
+}
+
+wait_for_host_available() {
+  local host="$1"
+  local label="$2"
+  [[ -n "$host" ]] || return 0
+  local timeout_seconds interval_seconds deadline state
+  timeout_seconds="$(duration_seconds "$host_wait_timeout")"
+  interval_seconds="$(duration_seconds "$host_wait_interval")"
+  deadline="$(($(date +%s) + timeout_seconds))"
+  printf 'waiting for EC2 Mac Dedicated Host %s to become available after %s lease stop; timeout=%s interval=%s\n' "$host" "$label" "$host_wait_timeout" "$host_wait_interval"
+  while true; do
+    state="$(mac_host_state "$host")"
+    if [[ "$state" == "available" ]]; then
+      printf 'host %s is available\n' "$host"
+      return 0
+    fi
+    if [[ "$(date +%s)" -ge "$deadline" ]]; then
+      printf 'timed out waiting for EC2 Mac Dedicated Host %s to become available; last state=%s\n' "$host" "${state:-missing}" >&2
+      return 1
+    fi
+    printf 'host %s state=%s; sleeping %ss\n' "$host" "${state:-missing}" "$interval_seconds"
+    sleep "$interval_seconds"
+  done
 }
 
 warmup_macos() {
@@ -141,7 +194,7 @@ if [[ ! -x "$CRABBOX_BIN" ]]; then
   exit 2
 fi
 
-printf 'macOS lifecycle smoke region=%s type=%s image=%s\n' "$region" "$instance_type" "$image_name"
+printf 'macOS lifecycle smoke region=%s type=%s image=%s host-wait=%s\n' "$region" "$instance_type" "$image_name" "$host_wait_timeout"
 run "$CRABBOX_BIN" admin mac-hosts offerings --region "$region" --type "$instance_type"
 hosts_json="$("$CRABBOX_BIN" admin mac-hosts list --region "$region" --type "$instance_type" --json)"
 printf '%s\n' "$hosts_json" | jq .
@@ -175,6 +228,7 @@ else
   allocate_log="$(mktemp)"
   run "$CRABBOX_BIN" admin mac-hosts allocate --region "$region" --type "$instance_type" --force | tee "$allocate_log"
   allocated_host="$(awk '/^allocated host=/{for (i=1; i<=NF; i++) if ($i ~ /^host=/) { sub(/^host=/, "", $i); print $i; exit }}' "$allocate_log")"
+  host_allocated_by_script=1
 fi
 
 if [[ -n "$allocated_host" ]]; then
@@ -189,7 +243,7 @@ if [[ "$create_image" != "1" ]]; then
   exit 0
 fi
 
-image_json="$("$CRABBOX_BIN" image create --id "$source_lease" --name "$image_name" --wait --wait-timeout "$image_wait_timeout" --json)"
+image_json="$("$CRABBOX_BIN" image create --id "$source_lease" --name "$image_name" --no-reboot=false --wait --wait-timeout "$image_wait_timeout" --json)"
 printf '%s\n' "$image_json" | jq .
 ami_id="$(printf '%s\n' "$image_json" | jq -r '.id // .image.id // empty')"
 if [[ -z "$ami_id" ]]; then
@@ -199,6 +253,7 @@ fi
 
 stop_lease "$source_lease"
 source_lease=""
+wait_for_host_available "$allocated_host" source
 
 candidate_lease="$(CRABBOX_AWS_AMI="$ami_id" warmup_macos candidate)"
 smoke_macos_lease "$candidate_lease" candidate
@@ -212,13 +267,19 @@ fi
 run "$CRABBOX_BIN" image promote "$ami_id" --target macos --region "$region" --json
 stop_lease "$candidate_lease"
 candidate_lease=""
+wait_for_host_available "$allocated_host" candidate
 
 promoted_lease="$(warmup_macos promoted)"
 smoke_macos_lease "$promoted_lease" promoted
 printf 'promoted macOS image lifecycle passed: %s\n' "$ami_id"
 
 if [[ "$release_host" == "1" && -n "$allocated_host" ]]; then
+  if [[ "$host_allocated_by_script" != "1" && "${CRABBOX_MACOS_RELEASE_EXISTING_HOST:-0}" != "1" ]]; then
+    printf 'refusing to release pre-existing EC2 Mac Dedicated Host %s; set CRABBOX_MACOS_RELEASE_EXISTING_HOST=1 to confirm.\n' "$allocated_host" >&2
+    exit 1
+  fi
   stop_lease "$promoted_lease"
   promoted_lease=""
+  wait_for_host_available "$allocated_host" promoted
   run "$CRABBOX_BIN" admin mac-hosts release "$allocated_host" --region "$region" --force
 fi
