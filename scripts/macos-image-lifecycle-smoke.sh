@@ -226,12 +226,17 @@ else
   fi
 
   allocate_log="$(mktemp)"
-  run "$CRABBOX_BIN" admin mac-hosts allocate --region "$region" --type "$instance_type" --force | tee "$allocate_log"
-  allocated_host="$(awk '/^allocated host=/{for (i=1; i<=NF; i++) if ($i ~ /^host=/) { sub(/^host=/, "", $i); print $i; exit }}' "$allocate_log")"
+  run "$CRABBOX_BIN" admin mac-hosts allocate --region "$region" --type "$instance_type" --force --json | tee "$allocate_log"
+  allocated_host="$(jq -r '.[0].id // empty' "$allocate_log")"
+  if [[ -z "$allocated_host" ]]; then
+    printf 'macOS lifecycle blocked after allocation: could not determine allocated EC2 Mac Dedicated Host id.\n' >&2
+    exit 1
+  fi
   host_allocated_by_script=1
 fi
 
 if [[ -n "$allocated_host" ]]; then
+  printf 'pinning macOS leases to EC2 Mac Dedicated Host: %s\n' "$allocated_host"
   export CRABBOX_AWS_MAC_HOST_ID="$allocated_host"
 fi
 
