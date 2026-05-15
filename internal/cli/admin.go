@@ -88,7 +88,7 @@ func leaseAuditCleanupSummary(audit CoordinatorLeaseCloudAudit) string {
 func (a App) adminMacHosts(ctx context.Context, args []string) error {
 	args = stripKongCommandPath(args, "admin", "mac-hosts")
 	if len(args) == 0 || isHelpArg(args[0]) {
-		return exit(2, "usage: crabbox admin mac-hosts <list|offerings|allocate|release> [flags]")
+		return exit(2, "usage: crabbox admin mac-hosts <list|offerings|allocate|release|policy> [flags]")
 	}
 	switch args[0] {
 	case "list":
@@ -99,9 +99,55 @@ func (a App) adminMacHosts(ctx context.Context, args []string) error {
 		return a.adminMacHostsAllocate(ctx, args[1:])
 	case "release":
 		return a.adminMacHostsRelease(ctx, args[1:])
+	case "policy":
+		return a.adminMacHostsPolicy(args[1:])
 	default:
-		return exit(2, "usage: crabbox admin mac-hosts <list|offerings|allocate|release> [flags]")
+		return exit(2, "usage: crabbox admin mac-hosts <list|offerings|allocate|release|policy> [flags]")
 	}
+}
+
+const macHostLifecyclePolicyJSON = `{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeHosts",
+        "ec2:DescribeInstanceTypeOfferings"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:AllocateHosts",
+        "ec2:ReleaseHosts"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:CreateAction": "AllocateHosts"
+        }
+      }
+    }
+  ]
+}`
+
+func (a App) adminMacHostsPolicy(args []string) error {
+	fs := newFlagSet("admin mac-hosts policy", a.Stderr)
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return exit(2, "usage: crabbox admin mac-hosts policy")
+	}
+	fmt.Fprintln(a.Stdout, macHostLifecyclePolicyJSON)
+	return nil
 }
 
 func (a App) adminMacHostsList(ctx context.Context, args []string) error {

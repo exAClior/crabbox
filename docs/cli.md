@@ -85,6 +85,7 @@ crabbox unshare --id <lease-id-or-slug> [--user <email>] [--org] [--all] [--json
 crabbox usage [--scope user|org|all] [--user <email>] [--org <name>] [--month YYYY-MM] [--json]
 crabbox admin leases [--state active|released|expired|failed] [--owner <email>] [--org <name>] [--json]
 crabbox admin lease-audit [--state expired] [--provider aws] [--fail-on-live] [--json]
+crabbox admin mac-hosts policy
 crabbox admin mac-hosts offerings [--region <region>] [--type mac2.metal] [--json]
 crabbox admin mac-hosts list [--region <region>] [--type <mac-type>] [--state <state>] [--json]
 crabbox admin mac-hosts allocate [--availability-zone <az>] [--region <region>] [--type mac2.metal] (--dry-run|--force)

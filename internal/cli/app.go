@@ -205,6 +205,7 @@ Common Flows:
   crabbox usage --scope org
   crabbox admin leases --state active
   crabbox admin lease-audit --state expired --provider aws
+  crabbox admin mac-hosts policy
   crabbox admin mac-hosts offerings --region eu-west-1
   crabbox admin mac-hosts list --region eu-west-1
   crabbox admin mac-hosts allocate --region eu-west-1 --dry-run

@@ -7,6 +7,7 @@ crabbox admin leases
 crabbox admin leases --state active --json
 crabbox admin lease-audit --state expired --provider aws
 crabbox admin lease-audit --fail-on-live
+crabbox admin mac-hosts policy
 crabbox admin mac-hosts offerings --region eu-west-1 --type mac2.metal
 crabbox admin mac-hosts list --region eu-west-1
 crabbox admin mac-hosts allocate --region eu-west-1 --type mac2.metal --dry-run
@@ -57,11 +58,11 @@ Flags:
 
 ## mac-hosts
 
-List offerings, list hosts, allocate hosts, or release AWS EC2 Mac Dedicated
-Hosts through the coordinator. `offerings`, `list`, and `allocate --dry-run`
-are read-only. Real `allocate` and `release` require `--force` because EC2 Mac
-Dedicated Hosts are billed separately from Crabbox leases and have AWS lifecycle
-constraints.
+Print the IAM policy, list offerings, list hosts, allocate hosts, or release
+AWS EC2 Mac Dedicated Hosts through the coordinator. `policy`, `offerings`,
+`list`, and `allocate --dry-run` are read-only. Real `allocate` and `release`
+require `--force` because EC2 Mac Dedicated Hosts are billed separately from
+Crabbox leases and have AWS lifecycle constraints.
 
 The coordinator AWS identity must allow `ec2:DescribeInstanceTypeOfferings`,
 `ec2:DescribeHosts`, `ec2:AllocateHosts`, `ec2:ReleaseHosts`, and
@@ -106,6 +107,9 @@ so `CreateTags` should be allowed only when the EC2 create action is
 Flags:
 
 ```text
+policy:
+  prints copy-pasteable AWS IAM JSON for EC2 Mac host lifecycle permissions
+
 list:
   --region <region>     AWS region
   --type <type>         filter by mac1.metal, mac2.metal, or another Mac type

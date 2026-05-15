@@ -33,6 +33,27 @@ func TestAdminMacHostsRejectsMissingSubcommand(t *testing.T) {
 	}
 }
 
+func TestAdminMacHostsPolicyPrintsLifecyclePermissions(t *testing.T) {
+	var stdout bytes.Buffer
+	app := App{Stdout: &stdout, Stderr: io.Discard}
+	if err := app.adminMacHosts(context.Background(), []string{"policy"}); err != nil {
+		t.Fatal(err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		`"ec2:DescribeInstanceTypeOfferings"`,
+		`"ec2:DescribeHosts"`,
+		`"ec2:AllocateHosts"`,
+		`"ec2:ReleaseHosts"`,
+		`"ec2:CreateTags"`,
+		`"ec2:CreateAction": "AllocateHosts"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("policy missing %s:\n%s", want, out)
+		}
+	}
+}
+
 func TestSummarizeMacHostDryRunMessage(t *testing.T) {
 	tests := []struct {
 		name    string
