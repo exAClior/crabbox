@@ -223,6 +223,9 @@ test("macOS lifecycle smoke writes a blocked IAM summary before paid work", asyn
   assert.equal(summary.evidence.hostAllocate, null);
   assert.equal(summary.evidence.webvncDaemon.source, null);
   assert.equal(summary.evidence.webvncStatus.source, null);
+  assert.equal(summary.artifacts.source, null);
+  assert.equal(summary.artifacts.candidate, null);
+  assert.equal(summary.artifacts.promoted, null);
 
   const evidenceFiles = await readdir(path.join(run.artifacts, "evidence"));
   assert.deepEqual(
@@ -256,6 +259,8 @@ test("macOS lifecycle smoke preserves full mock lifecycle evidence", async () =>
   assert.equal(summary.image.amiId, "ami-mock");
 
   for (const label of ["source", "candidate", "promoted"]) {
+    assert.equal(summary.artifacts[label], path.join(run.artifacts, label));
+    await readdir(summary.artifacts[label]);
     await assertFileContains(summary.evidence.hostWait[label], /host h-mock is available/);
     await assertFileContains(summary.evidence.warmup[label], /"leaseId":"cbx_/);
     await assertFileContains(summary.evidence.webvncDaemon[label], /webvnc daemon: ready/);

@@ -116,9 +116,11 @@ preflight_command() {
   printf ' %q' "$@" >&2
   printf '\n' >&2
   set +e
-  "$@" > >(tee "$out") 2> >(tee "$err" >&2)
+  "$@" >"$out" 2>"$err"
   local status=$?
   set -e
+  cat "$out"
+  cat "$err" >&2
   if [[ "$status" -ne 0 ]]; then
     preflight_blocker_from_stderr "$label" "$err"
     printf 'macOS lifecycle blocked before paid work: %s\n' "$blocker_message" >&2
@@ -155,6 +157,7 @@ write_summary() {
   local phase="$2"
   local aws_policy_log_path mac_host_policy_log_path macos_image_policy_log_path offerings_log_path hosts_log_path
   local dry_log_path allocate_log_path image_create_log_path image_promote_log_path
+  local source_artifact_dir_path candidate_artifact_dir_path promoted_artifact_dir_path
   local source_host_wait_log_path candidate_host_wait_log_path promoted_host_wait_log_path
   local source_warmup_log_path candidate_warmup_log_path promoted_warmup_log_path
   local source_webvnc_status_log_path candidate_webvnc_status_log_path promoted_webvnc_status_log_path
@@ -171,6 +174,9 @@ write_summary() {
   allocate_log_path="$(existing_file_or_empty "$allocate_log")"
   image_create_log_path="$(existing_file_or_empty "$image_create_log")"
   image_promote_log_path="$(existing_file_or_empty "$image_promote_log")"
+  source_artifact_dir_path="$(existing_dir_or_empty "$artifact_root/source")"
+  candidate_artifact_dir_path="$(existing_dir_or_empty "$artifact_root/candidate")"
+  promoted_artifact_dir_path="$(existing_dir_or_empty "$artifact_root/promoted")"
   source_host_wait_log_path="$(existing_file_or_empty "$source_host_wait_log")"
   candidate_host_wait_log_path="$(existing_file_or_empty "$candidate_host_wait_log")"
   promoted_host_wait_log_path="$(existing_file_or_empty "$promoted_host_wait_log")"
@@ -214,6 +220,9 @@ write_summary() {
     --arg allocateLog "$allocate_log_path" \
     --arg imageCreateLog "$image_create_log_path" \
     --arg imagePromoteLog "$image_promote_log_path" \
+    --arg sourceArtifactDir "$source_artifact_dir_path" \
+    --arg candidateArtifactDir "$candidate_artifact_dir_path" \
+    --arg promotedArtifactDir "$promoted_artifact_dir_path" \
     --arg sourceHostWaitLog "$source_host_wait_log_path" \
     --arg candidateHostWaitLog "$candidate_host_wait_log_path" \
     --arg promotedHostWaitLog "$promoted_host_wait_log_path" \
@@ -258,9 +267,9 @@ write_summary() {
         commands: ($blockerCommands | split("\n") | map(select(length > 0)))
       },
       artifacts: {
-        source: ($artifactRoot + "/source"),
-        candidate: ($artifactRoot + "/candidate"),
-        promoted: ($artifactRoot + "/promoted")
+        source: maybe_path($sourceArtifactDir),
+        candidate: maybe_path($candidateArtifactDir),
+        promoted: maybe_path($promotedArtifactDir)
       },
       evidence: {
         awsProviderPolicy: maybe_path($awsPolicyLog),
@@ -300,6 +309,13 @@ write_summary() {
 existing_file_or_empty() {
   local path="${1:-}"
   if [[ -n "$path" && -f "$path" ]]; then
+    printf '%s' "$path"
+  fi
+}
+
+existing_dir_or_empty() {
+  local path="${1:-}"
+  if [[ -n "$path" && -d "$path" ]]; then
     printf '%s' "$path"
   fi
 }
