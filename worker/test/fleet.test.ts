@@ -2444,6 +2444,38 @@ describe("fleet lease identity and idle", () => {
     await expect(response.json()).resolves.toMatchObject({ error: "image_promoted" });
   });
 
+  it("rejects deleting scoped promoted AWS images", async () => {
+    let deleted = "";
+    const storage = new MemoryStorage();
+    storage.seed("image:aws:promoted:macos:arm64_mac:eu-west-1", {
+      id: "ami-000000000001",
+      name: "crabbox-macos-test",
+      state: "available",
+      region: "eu-west-1",
+      target: "macos",
+      architecture: "arm64_mac",
+      promotedAt: "2026-05-01T12:46:00Z",
+    });
+    const fleet = testFleet(storage, {
+      aws: fakeProvider(undefined, {
+        onDeleteImage(imageID) {
+          deleted = imageID;
+        },
+      }),
+    });
+
+    const response = await fleet.fetch(
+      request("DELETE", "/v1/images/ami-000000000001", {
+        headers: { "x-crabbox-admin": "true" },
+        body: {},
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(deleted).toBe("");
+    await expect(response.json()).resolves.toMatchObject({ error: "image_promoted" });
+  });
+
   it("mints broker-owned artifact upload URLs without exposing secrets", async () => {
     const fleet = testFleet(
       new MemoryStorage(),

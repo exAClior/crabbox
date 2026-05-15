@@ -3088,9 +3088,7 @@ export class FleetDurableObject implements DurableObject {
       return json({ image: mergeAWSImageMetadata(image, known) });
     }
     if (method === "DELETE" && action === undefined) {
-      const promoted = await this.state.storage.get<PromotedImageRecord>(
-        legacyPromotedAWSImageKey(),
-      );
+      const promoted = await this.promotedAWSImageByID(imageID);
       if (promoted?.id === imageID) {
         return json(
           {
@@ -3181,6 +3179,13 @@ export class FleetDurableObject implements DurableObject {
       return scoped;
     }
     return this.state.storage.get<PromotedImageRecord>(legacyPromotedAWSImageKey());
+  }
+
+  private async promotedAWSImageByID(imageID: string): Promise<PromotedImageRecord | undefined> {
+    const promoted = await this.state.storage.list<PromotedImageRecord>({
+      prefix: promotedAWSImagePrefix(),
+    });
+    return [...promoted.values()].find((image) => image.id === imageID);
   }
 
   private async expireLeases(): Promise<void> {
@@ -3618,6 +3623,10 @@ function createdAWSImageKey(imageID: string): string {
 }
 
 function legacyPromotedAWSImageKey(): string {
+  return promotedAWSImagePrefix();
+}
+
+function promotedAWSImagePrefix(): string {
   return "image:aws:promoted";
 }
 
