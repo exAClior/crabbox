@@ -151,6 +151,15 @@ case "$1" in
       printf '{"id":"ami-mock","target":"macos","region":"eu-west-1"}\\n'
     fi
     ;;
+  checkpoint)
+    if [[ "$2" == "create" ]]; then
+      printf 'checkpoint created id=chk_macos kind=aws-ebs-snapshot resource=snap-mock state=available region=%s workdir=/Users/ec2-user/crabbox/crabbox\\n' "$region"
+    elif [[ "$2" == "fork" ]]; then
+      printf 'checkpoint forked id=%s lease=cbx_checkpoint slug=checkpoint image=snap-mock workdir=/Users/ec2-user/crabbox/crabbox\\n' "$3"
+    elif [[ "$2" == "delete" ]]; then
+      printf 'checkpoint deleted id=%s kind=aws-ebs-snapshot\\n' "$3"
+    fi
+    ;;
   stop)
     printf 'stopped %s\\n' "\${*: -1}"
     ;;
@@ -418,6 +427,9 @@ test("macOS lifecycle smoke preserves full mock lifecycle evidence", async () =>
   assert.equal(summary.host.allocatedByScript, true);
   assert.equal(summary.host.released, true);
   assert.equal(summary.image.amiId, "ami-mock");
+  assert.equal(summary.checkpoint.id, "chk_macos");
+  assert.equal(summary.checkpoint.deleted, true);
+  assert.equal(summary.leases.checkpointFork, "cbx_checkpoint");
 
   for (const label of ["source", "candidate", "promoted"]) {
     assert.equal(summary.artifacts[label], path.join(run.artifacts, label));
@@ -427,8 +439,16 @@ test("macOS lifecycle smoke preserves full mock lifecycle evidence", async () =>
     await assertFileContains(summary.evidence.webvncDaemon[label], /webvnc daemon: ready/);
     await assertFileContains(summary.evidence.webvncStatus[label], /portal bridge: connected=true/);
   }
+  assert.equal(summary.artifacts.checkpointFork, path.join(run.artifacts, "checkpoint"));
+  await readdir(summary.artifacts.checkpointFork);
+  await assertFileContains(summary.evidence.hostWait.checkpointFork, /host h-mock is available/);
+  await assertFileContains(summary.evidence.webvncDaemon.checkpointFork, /webvnc daemon: ready/);
+  await assertFileContains(summary.evidence.webvncStatus.checkpointFork, /portal bridge: connected=true/);
   await assertFileContains(summary.evidence.imageCreate, /ami-mock/);
   await assertFileContains(summary.evidence.imagePromote, /"target":"macos"/);
+  await assertFileContains(summary.evidence.checkpointCreate, /chk_macos/);
+  await assertFileContains(summary.evidence.checkpointFork, /cbx_checkpoint/);
+  await assertFileContains(summary.evidence.checkpointDelete, /checkpoint deleted/);
   await assertFileContains(summary.evidence.providerIdentity, /crabbox-runner/);
   await assertFileContains(summary.evidence.awsProviderPolicy, /ec2:RunInstances/);
   await assertFileContains(summary.evidence.macHostPolicy, /ec2:AllocateHosts/);
@@ -438,17 +458,30 @@ test("macOS lifecycle smoke preserves full mock lifecycle evidence", async () =>
   const evidenceFiles = await readdir(path.join(run.artifacts, "evidence"));
   assert.deepEqual(
     evidenceFiles.filter((name) => name.startsWith("webvnc-status-")).sort(),
-    ["webvnc-status-candidate.log", "webvnc-status-promoted.log", "webvnc-status-source.log"],
+    [
+      "webvnc-status-candidate.log",
+      "webvnc-status-checkpoint.log",
+      "webvnc-status-promoted.log",
+      "webvnc-status-source.log",
+    ],
   );
   assert.deepEqual(
     evidenceFiles.filter((name) => name.startsWith("webvnc-daemon-")).sort(),
-    ["webvnc-daemon-candidate.log", "webvnc-daemon-promoted.log", "webvnc-daemon-source.log"],
+    [
+      "webvnc-daemon-candidate.log",
+      "webvnc-daemon-checkpoint.log",
+      "webvnc-daemon-promoted.log",
+      "webvnc-daemon-source.log",
+    ],
   );
 
   const fakeLog = await readFile(run.fakeLog, "utf8");
   assert.equal((fakeLog.match(/^warmup\b/gm) ?? []).length, 3);
-  assert.equal((fakeLog.match(/^webvnc daemon start\b/gm) ?? []).length, 3);
-  assert.equal((fakeLog.match(/^webvnc status\b/gm) ?? []).length, 3);
+  assert.equal((fakeLog.match(/^webvnc daemon start\b/gm) ?? []).length, 4);
+  assert.equal((fakeLog.match(/^webvnc status\b/gm) ?? []).length, 4);
+  assert.match(fakeLog, /^checkpoint create --id cbx_source --name full-checkpoint --mode native --strategy disk-snapshot --wait --wait-timeout 60m$/m);
+  assert.match(fakeLog, /^checkpoint fork chk_macos$/m);
+  assert.match(fakeLog, /^checkpoint delete chk_macos$/m);
   assert.match(fakeLog, /^admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2\.metal --json$/m);
   assert.match(fakeLog, /^admin hosts release h-mock --provider aws --target macos --region eu-west-1 --force$/m);
 });

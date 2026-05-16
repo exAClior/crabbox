@@ -24,18 +24,22 @@ webvnc_start_grace="${CRABBOX_MACOS_WEBVNC_START_GRACE:-3s}"
 allocate="${CRABBOX_MACOS_ALLOCATE:-0}"
 run_existing="${CRABBOX_MACOS_RUN:-0}"
 create_image="${CRABBOX_MACOS_CREATE_IMAGE:-1}"
+checkpoint="${CRABBOX_MACOS_CHECKPOINT:-$create_image}"
 promote="${CRABBOX_MACOS_PROMOTE:-0}"
 open_webvnc="${CRABBOX_MACOS_OPEN_WEBVNC:-0}"
 keep_lease="${CRABBOX_MACOS_KEEP_LEASE:-0}"
+keep_checkpoint="${CRABBOX_MACOS_KEEP_CHECKPOINT:-0}"
 release_host="${CRABBOX_MACOS_RELEASE_HOST:-0}"
 artifact_root="${CRABBOX_MACOS_ARTIFACT_DIR:-$ROOT/.crabbox/macos-image-smoke/$image_name}"
 summary_file="$artifact_root/summary.json"
 evidence_dir="$artifact_root/evidence"
 
 source_lease=""
+checkpoint_fork_lease=""
 candidate_lease=""
 promoted_lease=""
 source_lease_id=""
+checkpoint_fork_lease_id=""
 candidate_lease_id=""
 promoted_lease_id=""
 allocated_host=""
@@ -43,6 +47,8 @@ host_id=""
 host_allocated_by_script=0
 host_released=0
 ami_id=""
+checkpoint_id=""
+checkpoint_deleted=0
 summary_result=""
 summary_phase="init"
 blocker_message=""
@@ -60,16 +66,22 @@ quota_log=""
 allocate_log=""
 image_create_log=""
 image_promote_log=""
+checkpoint_create_log=""
+checkpoint_fork_log=""
+checkpoint_delete_log=""
 source_host_wait_log=""
+checkpoint_host_wait_log=""
 candidate_host_wait_log=""
 promoted_host_wait_log=""
 source_warmup_log=""
 candidate_warmup_log=""
 promoted_warmup_log=""
 source_webvnc_status_log=""
+checkpoint_webvnc_status_log=""
 candidate_webvnc_status_log=""
 promoted_webvnc_status_log=""
 source_webvnc_daemon_log=""
+checkpoint_webvnc_daemon_log=""
 candidate_webvnc_daemon_log=""
 promoted_webvnc_daemon_log=""
 
@@ -197,13 +209,26 @@ stop_lease() {
   run "$CRABBOX_BIN" stop --provider aws --target macos "$lease" || true
 }
 
-cleanup() {
-  if [[ "$keep_lease" == "1" ]]; then
-    return 0
+delete_checkpoint() {
+  [[ -n "$checkpoint_id" ]] || return 0
+  [[ "$checkpoint_deleted" != "1" ]] || return 0
+  [[ "$keep_checkpoint" != "1" ]] || return 0
+  if [[ -z "$checkpoint_delete_log" ]]; then
+    checkpoint_delete_log="$evidence_dir/checkpoint-delete.log"
   fi
-  stop_lease "$promoted_lease"
-  stop_lease "$candidate_lease"
-  stop_lease "$source_lease"
+  if run_tee "$checkpoint_delete_log" "$CRABBOX_BIN" checkpoint delete "$checkpoint_id"; then
+    checkpoint_deleted=1
+  fi
+}
+
+cleanup() {
+  if [[ "$keep_lease" != "1" ]]; then
+    stop_lease "$promoted_lease"
+    stop_lease "$candidate_lease"
+    stop_lease "$checkpoint_fork_lease"
+    stop_lease "$source_lease"
+  fi
+  delete_checkpoint || true
 }
 
 write_summary() {
@@ -212,12 +237,13 @@ write_summary() {
   local provider_identity_log_path aws_policy_log_path mac_host_policy_log_path macos_image_policy_log_path offerings_log_path hosts_log_path
   local region_preflight_log_path
   local dry_log_path allocate_log_path image_create_log_path image_promote_log_path
+  local checkpoint_create_log_path checkpoint_fork_log_path checkpoint_delete_log_path
   local quota_log_path
-  local source_artifact_dir_path candidate_artifact_dir_path promoted_artifact_dir_path
-  local source_host_wait_log_path candidate_host_wait_log_path promoted_host_wait_log_path
+  local source_artifact_dir_path checkpoint_artifact_dir_path candidate_artifact_dir_path promoted_artifact_dir_path
+  local source_host_wait_log_path checkpoint_host_wait_log_path candidate_host_wait_log_path promoted_host_wait_log_path
   local source_warmup_log_path candidate_warmup_log_path promoted_warmup_log_path
-  local source_webvnc_status_log_path candidate_webvnc_status_log_path promoted_webvnc_status_log_path
-  local source_webvnc_daemon_log_path candidate_webvnc_daemon_log_path promoted_webvnc_daemon_log_path
+  local source_webvnc_status_log_path checkpoint_webvnc_status_log_path candidate_webvnc_status_log_path promoted_webvnc_status_log_path
+  local source_webvnc_daemon_log_path checkpoint_webvnc_daemon_log_path candidate_webvnc_daemon_log_path promoted_webvnc_daemon_log_path
   summary_result="$result"
   summary_phase="$phase"
   mkdir -p "$artifact_root"
@@ -233,19 +259,26 @@ write_summary() {
   allocate_log_path="$(existing_file_or_empty "$allocate_log")"
   image_create_log_path="$(existing_file_or_empty "$image_create_log")"
   image_promote_log_path="$(existing_file_or_empty "$image_promote_log")"
+  checkpoint_create_log_path="$(existing_file_or_empty "$checkpoint_create_log")"
+  checkpoint_fork_log_path="$(existing_file_or_empty "$checkpoint_fork_log")"
+  checkpoint_delete_log_path="$(existing_file_or_empty "$checkpoint_delete_log")"
   source_artifact_dir_path="$(existing_dir_or_empty "$artifact_root/source")"
+  checkpoint_artifact_dir_path="$(existing_dir_or_empty "$artifact_root/checkpoint")"
   candidate_artifact_dir_path="$(existing_dir_or_empty "$artifact_root/candidate")"
   promoted_artifact_dir_path="$(existing_dir_or_empty "$artifact_root/promoted")"
   source_host_wait_log_path="$(existing_file_or_empty "$source_host_wait_log")"
+  checkpoint_host_wait_log_path="$(existing_file_or_empty "$checkpoint_host_wait_log")"
   candidate_host_wait_log_path="$(existing_file_or_empty "$candidate_host_wait_log")"
   promoted_host_wait_log_path="$(existing_file_or_empty "$promoted_host_wait_log")"
   source_warmup_log_path="$(existing_file_or_empty "$source_warmup_log")"
   candidate_warmup_log_path="$(existing_file_or_empty "$candidate_warmup_log")"
   promoted_warmup_log_path="$(existing_file_or_empty "$promoted_warmup_log")"
   source_webvnc_status_log_path="$(existing_file_or_empty "$source_webvnc_status_log")"
+  checkpoint_webvnc_status_log_path="$(existing_file_or_empty "$checkpoint_webvnc_status_log")"
   candidate_webvnc_status_log_path="$(existing_file_or_empty "$candidate_webvnc_status_log")"
   promoted_webvnc_status_log_path="$(existing_file_or_empty "$promoted_webvnc_status_log")"
   source_webvnc_daemon_log_path="$(existing_file_or_empty "$source_webvnc_daemon_log")"
+  checkpoint_webvnc_daemon_log_path="$(existing_file_or_empty "$checkpoint_webvnc_daemon_log")"
   candidate_webvnc_daemon_log_path="$(existing_file_or_empty "$candidate_webvnc_daemon_log")"
   promoted_webvnc_daemon_log_path="$(existing_file_or_empty "$promoted_webvnc_daemon_log")"
   jq -n \
@@ -257,6 +290,7 @@ write_summary() {
     --arg imageName "$image_name" \
     --arg artifactRoot "$artifact_root" \
     --arg sourceLease "$source_lease_id" \
+    --arg checkpointForkLease "$checkpoint_fork_lease_id" \
     --arg candidateLease "$candidate_lease_id" \
     --arg promotedLease "$promoted_lease_id" \
     --arg hostID "$host_id" \
@@ -265,6 +299,10 @@ write_summary() {
     --arg hostReleased "$host_released" \
     --arg keepLease "$keep_lease" \
     --arg createImage "$create_image" \
+    --arg checkpoint "$checkpoint" \
+    --arg keepCheckpoint "$keep_checkpoint" \
+    --arg checkpointID "$checkpoint_id" \
+    --arg checkpointDeleted "$checkpoint_deleted" \
     --arg promote "$promote" \
     --arg amiID "$ami_id" \
     --arg blockerMessage "$blocker_message" \
@@ -282,19 +320,26 @@ write_summary() {
     --arg allocateLog "$allocate_log_path" \
     --arg imageCreateLog "$image_create_log_path" \
     --arg imagePromoteLog "$image_promote_log_path" \
+    --arg checkpointCreateLog "$checkpoint_create_log_path" \
+    --arg checkpointForkLog "$checkpoint_fork_log_path" \
+    --arg checkpointDeleteLog "$checkpoint_delete_log_path" \
     --arg sourceArtifactDir "$source_artifact_dir_path" \
+    --arg checkpointArtifactDir "$checkpoint_artifact_dir_path" \
     --arg candidateArtifactDir "$candidate_artifact_dir_path" \
     --arg promotedArtifactDir "$promoted_artifact_dir_path" \
     --arg sourceHostWaitLog "$source_host_wait_log_path" \
+    --arg checkpointHostWaitLog "$checkpoint_host_wait_log_path" \
     --arg candidateHostWaitLog "$candidate_host_wait_log_path" \
     --arg promotedHostWaitLog "$promoted_host_wait_log_path" \
     --arg sourceWarmupLog "$source_warmup_log_path" \
     --arg candidateWarmupLog "$candidate_warmup_log_path" \
     --arg promotedWarmupLog "$promoted_warmup_log_path" \
     --arg sourceWebVNCStatusLog "$source_webvnc_status_log_path" \
+    --arg checkpointWebVNCStatusLog "$checkpoint_webvnc_status_log_path" \
     --arg candidateWebVNCStatusLog "$candidate_webvnc_status_log_path" \
     --arg promotedWebVNCStatusLog "$promoted_webvnc_status_log_path" \
     --arg sourceWebVNCDaemonLog "$source_webvnc_daemon_log_path" \
+    --arg checkpointWebVNCDaemonLog "$checkpoint_webvnc_daemon_log_path" \
     --arg candidateWebVNCDaemonLog "$candidate_webvnc_daemon_log_path" \
     --arg promotedWebVNCDaemonLog "$promoted_webvnc_daemon_log_path" \
     'def maybe_path($path): if $path == "" then null else $path end;
@@ -314,6 +359,7 @@ write_summary() {
       },
       leases: {
         source: $sourceLease,
+        checkpointFork: $checkpointForkLease,
         candidate: $candidateLease,
         promoted: $promotedLease,
         keepRequested: ($keepLease == "1")
@@ -323,6 +369,12 @@ write_summary() {
         promoteRequested: ($promote == "1"),
         amiId: $amiID
       },
+      checkpoint: {
+        requested: ($checkpoint == "1"),
+        keepRequested: ($keepCheckpoint == "1"),
+        id: $checkpointID,
+        deleted: ($checkpointDeleted == "1")
+      },
       blocker: {
         reason: $blockerMessage,
         message: $blockerMessage,
@@ -331,6 +383,7 @@ write_summary() {
       },
       artifacts: {
         source: maybe_path($sourceArtifactDir),
+        checkpointFork: maybe_path($checkpointArtifactDir),
         candidate: maybe_path($candidateArtifactDir),
         promoted: maybe_path($promotedArtifactDir)
       },
@@ -347,8 +400,12 @@ write_summary() {
         hostAllocate: maybe_path($allocateLog),
         imageCreate: maybe_path($imageCreateLog),
         imagePromote: maybe_path($imagePromoteLog),
+        checkpointCreate: maybe_path($checkpointCreateLog),
+        checkpointFork: maybe_path($checkpointForkLog),
+        checkpointDelete: maybe_path($checkpointDeleteLog),
         hostWait: {
           source: maybe_path($sourceHostWaitLog),
+          checkpointFork: maybe_path($checkpointHostWaitLog),
           candidate: maybe_path($candidateHostWaitLog),
           promoted: maybe_path($promotedHostWaitLog)
         },
@@ -359,11 +416,13 @@ write_summary() {
         },
         webvncStatus: {
           source: maybe_path($sourceWebVNCStatusLog),
+          checkpointFork: maybe_path($checkpointWebVNCStatusLog),
           candidate: maybe_path($candidateWebVNCStatusLog),
           promoted: maybe_path($promotedWebVNCStatusLog)
         },
         webvncDaemon: {
           source: maybe_path($sourceWebVNCDaemonLog),
+          checkpointFork: maybe_path($checkpointWebVNCDaemonLog),
           candidate: maybe_path($candidateWebVNCDaemonLog),
           promoted: maybe_path($promotedWebVNCDaemonLog)
         }
@@ -421,6 +480,26 @@ process.exit(1);
 ' "$1"
 }
 
+checkpoint_id_from_log() {
+  node -e '
+const fs = require("fs");
+const text = fs.readFileSync(process.argv[1], "utf8");
+const match = text.match(/\bid=(chk_[A-Za-z0-9_-]+)/);
+if (!match) process.exit(1);
+console.log(match[1]);
+' "$1"
+}
+
+checkpoint_fork_lease_from_log() {
+  node -e '
+const fs = require("fs");
+const text = fs.readFileSync(process.argv[1], "utf8");
+const match = text.match(/\blease=([A-Za-z0-9_-]+)/);
+if (!match) process.exit(1);
+console.log(match[1]);
+' "$1"
+}
+
 duration_seconds() {
   local value="$1"
   local number
@@ -445,7 +524,7 @@ log_for_label() {
   local category="$1"
   local label="$2"
   case "$label" in
-    source | candidate | promoted) ;;
+    source | checkpoint | candidate | promoted) ;;
     *)
       printf 'invalid lifecycle label: %s\n' "$label" >&2
       exit 2
@@ -467,15 +546,18 @@ set_evidence_paths() {
   macos_image_policy_log="$evidence_dir/macos-image-policy.json"
   region_preflight_log="$evidence_dir/mac-host-region-preflight.json"
   source_host_wait_log="$(log_for_label host-wait source)"
+  checkpoint_host_wait_log="$(log_for_label host-wait checkpoint)"
   candidate_host_wait_log="$(log_for_label host-wait candidate)"
   promoted_host_wait_log="$(log_for_label host-wait promoted)"
   source_warmup_log="$(log_for_label warmup source)"
   candidate_warmup_log="$(log_for_label warmup candidate)"
   promoted_warmup_log="$(log_for_label warmup promoted)"
   source_webvnc_status_log="$(log_for_label webvnc-status source)"
+  checkpoint_webvnc_status_log="$(log_for_label webvnc-status checkpoint)"
   candidate_webvnc_status_log="$(log_for_label webvnc-status candidate)"
   promoted_webvnc_status_log="$(log_for_label webvnc-status promoted)"
   source_webvnc_daemon_log="$(log_for_label webvnc-daemon source)"
+  checkpoint_webvnc_daemon_log="$(log_for_label webvnc-daemon checkpoint)"
   candidate_webvnc_daemon_log="$(log_for_label webvnc-daemon candidate)"
   promoted_webvnc_daemon_log="$(log_for_label webvnc-daemon promoted)"
 }
@@ -674,6 +756,46 @@ smoke_macos_lease() {
     --json
 }
 
+create_checkpoint_from_source() {
+  [[ "$checkpoint" == "1" ]] || return 0
+  summary_phase="checkpoint-create"
+  checkpoint_create_log="$evidence_dir/checkpoint-create.log"
+  run_tee "$checkpoint_create_log" "$CRABBOX_BIN" checkpoint create \
+    --id "$source_lease" \
+    --name "$image_name-checkpoint" \
+    --mode native \
+    --strategy disk-snapshot \
+    --wait \
+    --wait-timeout "$image_wait_timeout"
+  checkpoint_id="$(checkpoint_id_from_log "$checkpoint_create_log")"
+  if [[ -z "$checkpoint_id" ]]; then
+    blocker_message="checkpoint create did not return a checkpoint id"
+    printf 'checkpoint create did not return a checkpoint id\n' >&2
+    exit 1
+  fi
+}
+
+smoke_checkpoint_fork() {
+  [[ "$checkpoint" == "1" ]] || return 0
+  [[ -n "$checkpoint_id" ]] || return 0
+  summary_phase="checkpoint-fork"
+  checkpoint_fork_log="$evidence_dir/checkpoint-fork.log"
+  run_tee "$checkpoint_fork_log" "$CRABBOX_BIN" checkpoint fork "$checkpoint_id"
+  checkpoint_fork_lease="$(checkpoint_fork_lease_from_log "$checkpoint_fork_log")"
+  checkpoint_fork_lease_id="$checkpoint_fork_lease"
+  if [[ -z "$checkpoint_fork_lease" ]]; then
+    blocker_message="checkpoint fork did not return a lease id"
+    printf 'checkpoint fork did not return a lease id\n' >&2
+    exit 1
+  fi
+  write_summary running checkpoint-smoke
+  smoke_macos_lease "$checkpoint_fork_lease" checkpoint
+  stop_lease "$checkpoint_fork_lease"
+  checkpoint_fork_lease=""
+  wait_for_host_available "$allocated_host" checkpoint
+  delete_checkpoint
+}
+
 need node
 need jq
 if [[ ! -x "$CRABBOX_BIN" ]]; then
@@ -806,6 +928,7 @@ source_lease="$(warmup_macos source)"
 source_lease_id="$source_lease"
 write_summary running source-smoke
 smoke_macos_lease "$source_lease" source
+create_checkpoint_from_source
 
 if [[ "$create_image" != "1" ]]; then
   if [[ "$release_host" == "1" || "$keep_lease" != "1" ]]; then
@@ -832,6 +955,7 @@ fi
 stop_lease "$source_lease"
 source_lease=""
 wait_for_host_available "$allocated_host" source
+smoke_checkpoint_fork
 
 write_summary running candidate-warmup
 candidate_lease="$(CRABBOX_AWS_AMI="$ami_id" warmup_macos candidate)"

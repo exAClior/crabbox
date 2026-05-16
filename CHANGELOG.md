@@ -28,6 +28,7 @@
 - Changed macOS image lifecycle blocked summaries to include a `blocker.reason` alias for automation that expects a short blocker reason.
 - Changed standalone macOS host region preflight blockers to use the guarded IAM apply helper instead of manual account-match shell snippets.
 - Hardened the macOS image lifecycle smoke so EC2 Mac Dedicated Host scrubbing, WebVNC daemon cleanup, active portal bridge checks, and `mac2.metal` to `mac1.metal` fallback are covered before image promotion.
+- Hardened the macOS image lifecycle smoke so native checkpoint snapshot creation, checkpoint forks, WebVNC proof, and checkpoint cleanup run before candidate-image promotion.
 - Documented the AWS account-match and IAM remediation flow for attaching the combined macOS image lifecycle policy to the coordinator role or user.
 - Clarified the EC2 Mac host IAM policy, including create-time tag permissions, Dedicated Mac host quota checks, and the split between baseline AWS provider permissions and paid macOS image bake, WebVNC, promotion, and cleanup permissions.
 - Clarified AWS security guardrail docs so IAM Access Analyzer external-access analyzers are created in every configured capacity region, while S3 Block Public Access and IAM password policy remain account-level controls.
