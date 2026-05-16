@@ -442,6 +442,66 @@ func TestCoordinatorAdminAWSIdentityFallsBackToLegacyRoute(t *testing.T) {
 	}
 }
 
+func TestCoordinatorLegacyFallbackKeepsNeutralNotFoundContext(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.String())
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	client := &CoordinatorClient{BaseURL: server.URL, Token: "admin-token", Client: server.Client()}
+
+	_, err := client.AdminAWSIdentity(context.Background(), "eu-west-1")
+	if err == nil {
+		t.Fatal("expected not found error")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"/v1/admin/providers/identity?provider=aws&region=eu-west-1",
+		"legacy compatibility route /v1/admin/aws-identity?region=eu-west-1 also returned 404",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error missing %q:\n%s", want, msg)
+		}
+	}
+	if !reflect.DeepEqual(seen, []string{
+		"GET /v1/admin/providers/identity?provider=aws&region=eu-west-1",
+		"GET /v1/admin/aws-identity?region=eu-west-1",
+	}) {
+		t.Fatalf("seen=%#v", seen)
+	}
+}
+
+func TestCoordinatorHostLegacyFallbackKeepsNeutralNotFoundContext(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.String())
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	client := &CoordinatorClient{BaseURL: server.URL, Token: "admin-token", Client: server.Client()}
+
+	_, err := client.AdminMacHostOfferings(context.Background(), "eu-west-1", "mac2.metal")
+	if err == nil {
+		t.Fatal("expected not found error")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"/v1/admin/hosts/offerings?provider=aws&region=eu-west-1&target=macos&type=mac2.metal",
+		"legacy compatibility route /v1/admin/mac-hosts/offerings?region=eu-west-1&type=mac2.metal also returned 404",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error missing %q:\n%s", want, msg)
+		}
+	}
+	if !reflect.DeepEqual(seen, []string{
+		"GET /v1/admin/hosts/offerings?provider=aws&region=eu-west-1&target=macos&type=mac2.metal",
+		"GET /v1/admin/mac-hosts/offerings?region=eu-west-1&type=mac2.metal",
+	}) {
+		t.Fatalf("seen=%#v", seen)
+	}
+}
+
 func mapStringString(input map[string]any) map[string]string {
 	out := map[string]string{}
 	for key, value := range input {

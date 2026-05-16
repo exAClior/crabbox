@@ -1137,7 +1137,16 @@ func (c *CoordinatorClient) doWithLegacyFallback(ctx context.Context, method, pa
 	if err == nil || !isCoordinatorNotFound(err) {
 		return err
 	}
-	return c.do(ctx, method, legacyPath, body, out)
+	legacyErr := c.do(ctx, method, legacyPath, body, out)
+	if legacyErr == nil || !isCoordinatorNotFound(legacyErr) {
+		return legacyErr
+	}
+	return CoordinatorHTTPError{
+		Method:     method,
+		Path:       path,
+		StatusCode: http.StatusNotFound,
+		Message:    fmt.Sprintf("endpoint not found; legacy compatibility route %s also returned 404", legacyPath),
+	}
 }
 
 func isCoordinatorNotFound(err error) bool {

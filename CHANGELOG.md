@@ -13,6 +13,10 @@
 
 - Changed the macOS host preflight and image lifecycle smoke to use the provider-neutral admin host/provider commands and `CRABBOX_HOST_ID` when pinning leases to an allocated host.
 
+### Fixed
+
+- Fixed provider-neutral admin command errors so older coordinators report the neutral route and the legacy compatibility route that both returned 404.
+
 ## 0.14.0 - 2026-05-15
 
 ### Added
