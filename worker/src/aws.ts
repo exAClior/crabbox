@@ -597,9 +597,9 @@ export class EC2SpotClient {
 
   async listMacHostQuotas(serverType = "mac2.metal"): Promise<AWSServiceQuota[]> {
     const family = awsMacHostFamily(serverType);
-    const direct = await this.macHostQuotaByFamily(family);
+    const direct = await this.macHostQuotasByFamily(family);
     if (direct) {
-      return [direct];
+      return direct;
     }
     const all = await this.listEC2ServiceQuotas();
     const macHostQuotas = all.filter((quota) => {
@@ -617,18 +617,23 @@ export class EC2SpotClient {
     });
   }
 
-  private async macHostQuotaByFamily(family: string): Promise<AWSServiceQuota | undefined> {
+  private async macHostQuotasByFamily(family: string): Promise<AWSServiceQuota[] | undefined> {
     const spec = awsMacHostQuotaSpecs[family];
     if (!spec) {
       return undefined;
     }
     const quota = await this.getEC2ServiceQuota(spec.quotaCode);
-    return {
-      ...quota,
-      quotaCode: quota.quotaCode || spec.quotaCode,
-      quotaName: quota.quotaName || spec.quotaName,
-      serviceCode: quota.serviceCode || "ec2",
-    };
+    if (!quota) {
+      return [];
+    }
+    return [
+      {
+        ...quota,
+        quotaCode: quota.quotaCode || spec.quotaCode,
+        quotaName: quota.quotaName || spec.quotaName,
+        serviceCode: quota.serviceCode || "ec2",
+      },
+    ];
   }
 
   async releaseMacHost(hostID: string): Promise<string[]> {
@@ -1248,7 +1253,7 @@ export class EC2SpotClient {
     return quotas;
   }
 
-  private async getEC2ServiceQuota(quotaCode: string): Promise<AWSServiceQuota> {
+  private async getEC2ServiceQuota(quotaCode: string): Promise<AWSServiceQuota | undefined> {
     const response = await this.serviceQuotas.fetch(this.serviceQuotasEndpoint, {
       method: "POST",
       headers: {
@@ -1259,6 +1264,9 @@ export class EC2SpotClient {
     });
     const text = await response.text();
     if (!response.ok) {
+      if (text.includes("NoSuchResourceException")) {
+        return undefined;
+      }
       throw new Error(`aws GetServiceQuota: http ${response.status}: ${trimBody(text)}`);
     }
     const quota = awsServiceQuotaFromRecord(record(JSON.parse(text))["Quota"]);

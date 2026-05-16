@@ -2664,6 +2664,49 @@ describe("fleet lease identity and idle", () => {
     });
   });
 
+  it("reports no Mac host quota when a known quota code is absent in the region", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+      async (input, init) => {
+        const awsRequest = input instanceof Request ? input : new Request(input, init);
+        expect(new URL(awsRequest.url).hostname).toBe("servicequotas.eu-central-1.amazonaws.com");
+        expect(awsRequest.headers.get("x-amz-target")).toBe(
+          "ServiceQuotasV20190624.GetServiceQuota",
+        );
+        return new Response(
+          JSON.stringify({
+            __type: "NoSuchResourceException",
+            Message: "The request failed because the specified quota and service do not exist.",
+          }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const fleet = testFleet(
+      new MemoryStorage(),
+      {},
+      {
+        AWS_ACCESS_KEY_ID: "test",
+        AWS_SECRET_ACCESS_KEY: "test",
+        CRABBOX_AWS_REGION: "eu-west-1",
+      },
+    );
+
+    const response = await fleet.fetch(
+      request("GET", "/v1/admin/mac-hosts/quota?region=eu-central-1&type=mac2.metal", {
+        headers: { "x-crabbox-admin": "true" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    await expect(response.json()).resolves.toMatchObject({
+      region: "eu-central-1",
+      type: "mac2.metal",
+      quotas: [],
+    });
+  });
+
   it("reports the coordinator AWS identity through an admin route", async () => {
     const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
       async (input, init) => {

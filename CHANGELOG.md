@@ -42,6 +42,7 @@
 - Fixed macOS image lifecycle evidence and artifact summaries so paths are only populated after the matching files or directories are captured.
 - Fixed macOS image lifecycle cleanup and release paths so script-allocated hosts and local WebVNC daemons are stopped after source-only, candidate-only, blocked, partial, and completed runs.
 - Fixed EC2 Mac host dry-run JSON output so AWS authorization failures do not expose raw provider error details in operator logs.
+- Fixed EC2 Mac host quota checks so unsupported regional Mac quota resources return an empty quota result instead of a 502 preflight error.
 - Fixed missing coordinator Mac host admin endpoints so they report a blocked preflight instead of an empty preflight failure.
 - Fixed coordinator-backed macOS lease reuse so follow-up `run`, sync, and image smoke commands use the brokered `/Users/ec2-user/crabbox` work root instead of Linux's `/work/crabbox`.
 - Fixed remote macOS screenshots so `crabbox screenshot` captures the Screen Sharing/VNC framebuffer instead of relying on `screencapture` from non-interactive SSH sessions.
