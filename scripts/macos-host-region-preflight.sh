@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CRABBOX_BIN="${CRABBOX_BIN:-$ROOT/bin/crabbox}"
 CRABBOX_REMEDIATION_BIN="${CRABBOX_REMEDIATION_BIN:-crabbox}"
 CRABBOX_REGION_PREFLIGHT_COMMAND="${CRABBOX_REGION_PREFLIGHT_COMMAND:-scripts/macos-host-region-preflight.sh}"
+CRABBOX_MACOS_IAM_APPLY_COMMAND="${CRABBOX_MACOS_IAM_APPLY_COMMAND:-scripts/apply-macos-image-iam-policy.sh}"
 
 if [[ -n "${CRABBOX_MACOS_TYPE:-}" ]]; then
   types_raw="$CRABBOX_MACOS_TYPE"
@@ -110,10 +111,10 @@ remediation_region="${regions[0]}"
 blocker_commands_json="$(
   printf '%s\n' \
     "$CRABBOX_REMEDIATION_BIN admin providers identity --provider aws --region $remediation_region" \
-    "$CRABBOX_REMEDIATION_BIN admin providers policy --provider aws --target macos" \
-    "coordinator_account=\$($CRABBOX_REMEDIATION_BIN admin providers identity --provider aws --region $remediation_region --json | jq -r .account)" \
-    "local_account=\$(aws sts get-caller-identity --query Account --output text)" \
-    "test \"\$local_account\" = \"\$coordinator_account\"" \
+    "$CRABBOX_REMEDIATION_BIN admin providers identity --provider aws --region $remediation_region --json > provider-identity.json" \
+    "$CRABBOX_REMEDIATION_BIN admin providers policy --provider aws --target macos > macos-image-policy.json" \
+    "$CRABBOX_MACOS_IAM_APPLY_COMMAND --identity provider-identity.json --policy macos-image-policy.json --profile auto" \
+    "$CRABBOX_MACOS_IAM_APPLY_COMMAND --identity provider-identity.json --policy macos-image-policy.json --profile auto --apply" \
     "$CRABBOX_REGION_PREFLIGHT_COMMAND" |
     jq -R . |
     jq -s .

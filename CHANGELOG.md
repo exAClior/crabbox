@@ -16,6 +16,7 @@
 - Changed the macOS image lifecycle smoke artifact to include the coordinator provider identity used for IAM remediation.
 - Changed macOS image lifecycle smoke blocker commands to use the guarded IAM apply helper for coordinator permission remediation.
 - Changed macOS image lifecycle blocked summaries to include a `blocker.reason` alias for automation that expects a short blocker reason.
+- Changed standalone macOS host region preflight blockers to use the guarded IAM apply helper instead of manual account-match shell snippets.
 
 ### Fixed
 
