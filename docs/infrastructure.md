@@ -251,6 +251,14 @@ It checks for an existing reusable Dedicated Host first, then runs allocation
 dry-runs by region and returns JSON with `ready-existing-host`,
 `ready-allocation`, or `blocked`.
 
+The guarded macOS image lifecycle smoke also runs that region preflight
+automatically when `CRABBOX_MACOS_REGIONS` or `CRABBOX_CAPACITY_REGIONS` is set
+and `CRABBOX_MACOS_REGION` is not set. It records the region-preflight JSON in
+`summary.json` evidence and continues in the selected region only when a
+reusable host or dry-run-ready allocation region is found. Set
+`CRABBOX_MACOS_REGION_PREFLIGHT=0` to skip this automatic selection, or set
+`CRABBOX_MACOS_REGION` to force one region.
+
 SSH ingress for AWS security groups is source-scoped. If `CRABBOX_AWS_SSH_CIDRS` is set, Crabbox adds those CIDRs. Otherwise, the CLI sends its detected outbound IPv4 `/32` to the broker; when that is unavailable, the Worker falls back to `CF-Connecting-IP` as `/32` or `/128`. Direct and brokered AWS open the primary SSH port plus configured fallback ports. Crabbox also revokes the old managed `0.0.0.0/0` SSH ingress rule when the broker touches the managed security group. Supplying `CRABBOX_AWS_SECURITY_GROUP_ID` makes network policy your responsibility.
 
 ## Machine Classes

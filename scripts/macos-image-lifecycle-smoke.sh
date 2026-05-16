@@ -5,6 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CRABBOX_BIN="${CRABBOX_BIN:-$ROOT/bin/crabbox}"
 
 region="${CRABBOX_MACOS_REGION:-eu-west-1}"
+regions_raw="${CRABBOX_MACOS_REGIONS:-${CRABBOX_CAPACITY_REGIONS:-}}"
+region_preflight="${CRABBOX_MACOS_REGION_PREFLIGHT:-auto}"
+region_preflight_script="${CRABBOX_MACOS_REGION_PREFLIGHT_SCRIPT:-$ROOT/scripts/macos-host-region-preflight.sh}"
 instance_type="${CRABBOX_MACOS_TYPE:-mac2.metal}"
 image_name="${CRABBOX_MACOS_IMAGE_NAME:-crabbox-macos-arm64-$(date -u +%Y%m%d-%H%M)}"
 ttl="${CRABBOX_MACOS_TTL:-2h}"
@@ -45,6 +48,7 @@ blocker_commands=""
 aws_policy_log=""
 mac_host_policy_log=""
 macos_image_policy_log=""
+region_preflight_log=""
 offerings_log=""
 hosts_log=""
 dry_log=""
@@ -196,6 +200,7 @@ write_summary() {
   local result="$1"
   local phase="$2"
   local aws_policy_log_path mac_host_policy_log_path macos_image_policy_log_path offerings_log_path hosts_log_path
+  local region_preflight_log_path
   local dry_log_path allocate_log_path image_create_log_path image_promote_log_path
   local quota_log_path
   local source_artifact_dir_path candidate_artifact_dir_path promoted_artifact_dir_path
@@ -209,6 +214,7 @@ write_summary() {
   aws_policy_log_path="$(existing_file_or_empty "$aws_policy_log")"
   mac_host_policy_log_path="$(existing_file_or_empty "$mac_host_policy_log")"
   macos_image_policy_log_path="$(existing_file_or_empty "$macos_image_policy_log")"
+  region_preflight_log_path="$(existing_file_or_empty "$region_preflight_log")"
   offerings_log_path="$(existing_file_or_empty "$offerings_log")"
   hosts_log_path="$(existing_file_or_empty "$hosts_log")"
   dry_log_path="$(existing_file_or_empty "$dry_log")"
@@ -256,6 +262,7 @@ write_summary() {
     --arg awsPolicyLog "$aws_policy_log_path" \
     --arg macHostPolicyLog "$mac_host_policy_log_path" \
     --arg macosImagePolicyLog "$macos_image_policy_log_path" \
+    --arg regionPreflightLog "$region_preflight_log_path" \
     --arg offeringsLog "$offerings_log_path" \
     --arg hostsLog "$hosts_log_path" \
     --arg dryLog "$dry_log_path" \
@@ -318,6 +325,7 @@ write_summary() {
         awsProviderPolicy: maybe_path($awsPolicyLog),
         macHostPolicy: maybe_path($macHostPolicyLog),
         macosImagePolicy: maybe_path($macosImagePolicyLog),
+        regionPreflight: maybe_path($regionPreflightLog),
         hostOfferings: maybe_path($offeringsLog),
         hostList: maybe_path($hostsLog),
         hostDryRun: maybe_path($dryLog),
@@ -442,6 +450,7 @@ set_evidence_paths() {
   aws_policy_log="$evidence_dir/aws-provider-policy.json"
   mac_host_policy_log="$evidence_dir/mac-host-policy.json"
   macos_image_policy_log="$evidence_dir/macos-image-policy.json"
+  region_preflight_log="$evidence_dir/mac-host-region-preflight.json"
   source_host_wait_log="$(log_for_label host-wait source)"
   candidate_host_wait_log="$(log_for_label host-wait candidate)"
   promoted_host_wait_log="$(log_for_label host-wait promoted)"
@@ -454,6 +463,61 @@ set_evidence_paths() {
   source_webvnc_daemon_log="$(log_for_label webvnc-daemon source)"
   candidate_webvnc_daemon_log="$(log_for_label webvnc-daemon candidate)"
   promoted_webvnc_daemon_log="$(log_for_label webvnc-daemon promoted)"
+}
+
+should_run_region_preflight() {
+  case "$region_preflight" in
+    1 | true | yes) return 0 ;;
+    0 | false | no) return 1 ;;
+    auto)
+      [[ -z "${CRABBOX_MACOS_REGION:-}" && -n "$regions_raw" ]]
+      return
+      ;;
+    *)
+      printf 'invalid CRABBOX_MACOS_REGION_PREFLIGHT: %s\n' "$region_preflight" >&2
+      exit 2
+      ;;
+  esac
+}
+
+select_region_from_preflight() {
+  should_run_region_preflight || return 0
+  if [[ ! -x "$region_preflight_script" ]]; then
+    printf 'CRABBOX_MACOS_REGION_PREFLIGHT_SCRIPT is not executable: %s\n' "$region_preflight_script" >&2
+    exit 2
+  fi
+
+  summary_phase="region-preflight"
+  set +e
+  CRABBOX_BIN="$CRABBOX_BIN" \
+    CRABBOX_MACOS_TYPE="$instance_type" \
+    "$region_preflight_script" >"$region_preflight_log" 2>"${region_preflight_log}.stderr"
+  local status=$?
+  set -e
+  cat "$region_preflight_log"
+  cat "${region_preflight_log}.stderr" >&2
+
+  if [[ "$status" -ne 0 ]]; then
+    blocker_message="$(jq -r '.blocker.message // "no configured macOS region is ready"' "$region_preflight_log" 2>/dev/null || printf 'no configured macOS region is ready')"
+    blocker_remediation="$(jq -r '.blocker.remediation // "Rerun the macOS region preflight after IAM, quota, or host availability changes."' "$region_preflight_log" 2>/dev/null || printf 'Rerun the macOS region preflight after IAM, quota, or host availability changes.')"
+    blocker_commands="$(printf '%s\n' \
+      "$CRABBOX_BIN admin aws-identity --region $region" \
+      "$CRABBOX_BIN admin aws-policy --mac-hosts" \
+      "$region_preflight_script")"
+    printf 'macOS lifecycle blocked before paid work: %s\n' "$blocker_message" >&2
+    write_summary blocked region-preflight
+    exit 1
+  fi
+
+  local selected_region
+  selected_region="$(jq -r '.selectedRegion // empty' "$region_preflight_log")"
+  if [[ -z "$selected_region" ]]; then
+    blocker_message="macOS region preflight succeeded but did not return selectedRegion"
+    printf 'macOS lifecycle blocked before paid work: %s\n' "$blocker_message" >&2
+    write_summary blocked region-preflight
+    exit 1
+  fi
+  region="$selected_region"
 }
 
 mac_host_state() {
@@ -591,6 +655,7 @@ fi
 
 mkdir -p "$evidence_dir"
 set_evidence_paths
+select_region_from_preflight
 write_summary running preflight
 printf 'macOS lifecycle smoke region=%s type=%s image=%s host-wait=%s\n' "$region" "$instance_type" "$image_name" "$host_wait_timeout"
 preflight_command provider-policy "aws provider policy" "$aws_policy_log" "$CRABBOX_BIN" admin aws-policy

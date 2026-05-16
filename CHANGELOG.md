@@ -17,6 +17,7 @@
 - Fixed the macOS image lifecycle smoke so Mac host quota preflight failures are preserved as evidence even when EC2 Mac host dry-run is also blocked.
 - Fixed the macOS image lifecycle smoke so combined quota and EC2 Mac host dry-run IAM blockers include rerun commands for both preflights.
 - Added a no-spend macOS host region preflight helper for checking reusable EC2 Mac Dedicated Hosts and dry-run allocation readiness across configured regions.
+- Added automatic region preflight integration to the macOS image lifecycle smoke when `CRABBOX_MACOS_REGIONS` is set and no single `CRABBOX_MACOS_REGION` is forced.
 - Added `crabbox admin mac-hosts quota` and a guarded lifecycle smoke preflight so EC2 Mac Dedicated Host quota is checked before paid host allocation.
 - Added a macOS image lifecycle `summary.json` artifact with the run phase, host id, lease ids, AMI id, and artifact paths for blocked, partial, and completed runs.
 - Added remediation text and commands to blocked macOS image lifecycle summaries so IAM and coordinator preflight failures are actionable from the artifact.
