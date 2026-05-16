@@ -39,13 +39,13 @@ func captureRemoteMacVNCScreenshot(ctx context.Context, target SSHTarget, output
 	}
 	defer stopProcess(tunnel)
 
-	password, err := runSSHOutput(ctx, target, vncPasswordCommand(target))
-	if err != nil {
-		return exit(5, "read macOS VNC password: %v", err)
+	password := ""
+	if out, err := runSSHOutput(ctx, target, vncPasswordCommand(target)); err == nil {
+		password = strings.TrimSpace(out)
 	}
 	creds := rfbCredentials{
 		Username: strings.TrimSpace(target.User),
-		Password: strings.TrimSpace(password),
+		Password: password,
 	}
 	img, err := captureRFBFrame(ctx, "127.0.0.1:"+localPort, creds)
 	if err != nil {

@@ -789,7 +789,7 @@ func TestApplyAWSAMICheckpointForkConfigPreservesExplicitTypeFlag(t *testing.T) 
 	}
 }
 
-func TestApplyAWSMacOSCheckpointForkConfigPreservesHostAndOnDemand(t *testing.T) {
+func TestApplyAWSMacOSCheckpointForkConfigPreservesTypeWithoutHostPin(t *testing.T) {
 	fs := newFlagSet("checkpoint fork", io.Discard)
 	_ = fs.String("type", "", "provider type")
 	_ = fs.String("market", "spot", "capacity market")
@@ -812,8 +812,8 @@ func TestApplyAWSMacOSCheckpointForkConfigPreservesHostAndOnDemand(t *testing.T)
 	if cfg.Provider != "aws" || cfg.TargetOS != targetMacOS || cfg.AWSSnapshot != "snap-000000000001" {
 		t.Fatalf("aws macOS snapshot config not applied: %#v", cfg)
 	}
-	if cfg.HostID != "h-000000000001" || cfg.AWSMacHostID != "h-000000000001" {
-		t.Fatalf("host pin not applied: hostID=%q awsMacHostID=%q", cfg.HostID, cfg.AWSMacHostID)
+	if cfg.HostID != "" || cfg.AWSMacHostID != "" {
+		t.Fatalf("host pin carried into fork: hostID=%q awsMacHostID=%q", cfg.HostID, cfg.AWSMacHostID)
 	}
 	if cfg.ServerType != "mac2-m2pro.metal" || !cfg.ServerTypeExplicit {
 		t.Fatalf("server type not preserved: type=%q explicit=%t", cfg.ServerType, cfg.ServerTypeExplicit)
