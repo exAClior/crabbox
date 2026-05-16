@@ -615,13 +615,16 @@ select_region_from_preflight() {
   if [[ "$status" -ne 0 ]]; then
     blocker_message="$(jq -r '.blocker.message // "no configured macOS region is ready"' "$region_preflight_log" 2>/dev/null || printf 'no configured macOS region is ready')"
     blocker_remediation="$(jq -r '.blocker.remediation // "Rerun the macOS region preflight after IAM, quota, or host availability changes."' "$region_preflight_log" 2>/dev/null || printf 'Rerun the macOS region preflight after IAM, quota, or host availability changes.')"
-    blocker_commands="$(printf '%s\n' \
-      "$CRABBOX_REMEDIATION_BIN admin providers identity --provider aws --region $region" \
-      "$CRABBOX_REMEDIATION_BIN admin providers policy --provider aws --target macos" \
-      "coordinator_account=\$($CRABBOX_REMEDIATION_BIN admin providers identity --provider aws --region $region --json | jq -r .account)" \
-      "local_account=\$(aws sts get-caller-identity --query Account --output text)" \
-      "test \"\$local_account\" = \"\$coordinator_account\"" \
-      "$region_preflight_command")"
+    blocker_commands="$(jq -r '.blocker.commands[]? // empty' "$region_preflight_log" 2>/dev/null || true)"
+    if [[ -z "$blocker_commands" ]]; then
+      blocker_commands="$(printf '%s\n' \
+        "$CRABBOX_REMEDIATION_BIN admin providers identity --provider aws --region $region" \
+        "$CRABBOX_REMEDIATION_BIN admin providers identity --provider aws --region $region --json > provider-identity.json" \
+        "$CRABBOX_REMEDIATION_BIN admin providers policy --provider aws --target macos > macos-image-policy.json" \
+        "$iam_apply_command --identity provider-identity.json --policy macos-image-policy.json --profile auto" \
+        "$iam_apply_command --identity provider-identity.json --policy macos-image-policy.json --profile auto --apply" \
+        "$region_preflight_command")"
+    fi
     printf 'macOS lifecycle blocked before paid work: %s\n' "$blocker_message" >&2
     write_summary blocked region-preflight
     exit 1

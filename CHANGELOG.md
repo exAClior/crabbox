@@ -39,6 +39,7 @@
 
 ### Fixed
 
+- Fixed macOS image lifecycle region-preflight blockers so they preserve guarded IAM helper remediation commands from the region preflight evidence instead of falling back to manual account-match snippets.
 - Fixed provider-neutral admin command errors so older coordinators report the neutral route and the legacy compatibility route that both returned 404.
 - Fixed coordinator-backed macOS checkpoint metadata so an auto-discovered provider host id is preserved for snapshot forks.
 - Fixed provider-neutral host pin requests and lease records so the public JSON field is `hostId`, while `hostID` remains accepted for compatibility.

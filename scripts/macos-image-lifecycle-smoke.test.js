@@ -204,6 +204,40 @@ async function setupRun() {
   };
 }
 
+async function makeBlockedRegionPreflight(dir) {
+  const script = path.join(dir, "blocked-region-preflight.sh");
+  await writeFile(
+    script,
+    `#!/usr/bin/env bash
+set -euo pipefail
+cat <<'JSON'
+{
+  "result": "blocked",
+  "instanceType": "mac2.metal",
+  "selectedInstanceType": null,
+  "selectedRegion": null,
+  "blocker": {
+    "message": "no configured region/type has an available EC2 Mac Dedicated Host or quota-backed no-spend allocation dry-run",
+    "remediation": "Apply crabbox admin providers policy --provider aws --target macos to the coordinator AWS identity, verify regional EC2 Mac Dedicated Host quota, then rerun this preflight before paid allocation.",
+    "commands": [
+      "crabbox admin providers identity --provider aws --region eu-west-1",
+      "crabbox admin providers identity --provider aws --region eu-west-1 --json > provider-identity.json",
+      "crabbox admin providers policy --provider aws --target macos > macos-image-policy.json",
+      "scripts/apply-macos-image-iam-policy.sh --identity provider-identity.json --policy macos-image-policy.json --profile auto",
+      "scripts/apply-macos-image-iam-policy.sh --identity provider-identity.json --policy macos-image-policy.json --profile auto --apply",
+      "scripts/macos-host-region-preflight.sh"
+    ]
+  },
+  "regions": []
+}
+JSON
+exit 1
+`,
+  );
+  await chmod(script, 0o755);
+  return script;
+}
+
 async function readJSON(file) {
   return JSON.parse(await readFile(file, "utf8"));
 }
@@ -246,6 +280,42 @@ test("macOS lifecycle smoke reports a missing coordinator mac-host endpoint befo
   assert.match(summary.blocker.message, /does not expose provider-neutral host lifecycle admin endpoints/);
   assert.match(summary.blocker.remediation, /\/v1\/admin\/hosts/);
   assert.match(summary.blocker.remediation, /Deploy a coordinator/);
+});
+
+test("macOS lifecycle smoke preserves region preflight remediation commands", async () => {
+  const run = await setupRun();
+  const regionPreflight = await makeBlockedRegionPreflight(run.dir);
+  const result = await runLifecycle({
+    CRABBOX_BIN: run.fake,
+    CRABBOX_FAKE_LOG: run.fakeLog,
+    CRABBOX_FAKE_STATE: run.fakeState,
+    CRABBOX_MACOS_ARTIFACT_DIR: run.artifacts,
+    CRABBOX_MACOS_IMAGE_NAME: "region-preflight-blocked",
+    CRABBOX_MACOS_REGIONS: "eu-west-1,us-east-1",
+    CRABBOX_MACOS_REGION_PREFLIGHT_SCRIPT: regionPreflight,
+    CRABBOX_MACOS_WEBVNC_START_GRACE: "0s",
+  });
+
+  assert.equal(result.code, 1, result.stdout + result.stderr);
+  const summary = await readJSON(path.join(run.artifacts, "summary.json"));
+  assertSummaryOmitsArtifactRoot(summary, run.artifacts);
+  assert.equal(summary.result, "blocked");
+  assert.equal(summary.phase, "region-preflight");
+  assert.match(summary.blocker.message, /quota-backed/);
+  assert.deepEqual(summary.blocker.commands, [
+    "crabbox admin providers identity --provider aws --region eu-west-1",
+    "crabbox admin providers identity --provider aws --region eu-west-1 --json > provider-identity.json",
+    "crabbox admin providers policy --provider aws --target macos > macos-image-policy.json",
+    "scripts/apply-macos-image-iam-policy.sh --identity provider-identity.json --policy macos-image-policy.json --profile auto",
+    "scripts/apply-macos-image-iam-policy.sh --identity provider-identity.json --policy macos-image-policy.json --profile auto --apply",
+    "scripts/macos-host-region-preflight.sh",
+  ]);
+  assert.equal(
+    summary.blocker.commands.some((command) => command.includes("coordinator_account")),
+    false,
+  );
+  assert.equal(summary.evidence.regionPreflight, "evidence/mac-host-region-preflight.json");
+  await assertSummaryFileContains(run.artifacts, summary.evidence.regionPreflight, /scripts\/apply-macos-image-iam-policy\.sh/);
 });
 
 test("macOS lifecycle smoke writes a blocked IAM summary before paid work", async () => {
