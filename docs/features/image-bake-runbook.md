@@ -200,30 +200,27 @@ before doing the real allocation. Confirm the caller identity and print the
 copy-pasteable combined policy with:
 
 ```bash
-crabbox admin providers identity --provider aws --region eu-west-1 --json
+crabbox admin providers identity --provider aws --region eu-west-1 --json > /tmp/crabbox-provider-identity.json
 crabbox admin providers policy --provider aws --target macos > /tmp/crabbox-macos-image-policy.json
 crabbox admin hosts policy --provider aws --target macos
 
-coordinator_account=$(crabbox admin providers identity --provider aws --region eu-west-1 --json | jq -r .account)
-local_account=$(aws sts get-caller-identity --query Account --output text)
-test "$local_account" = "$coordinator_account"
+scripts/apply-macos-image-iam-policy.sh \
+  --identity /tmp/crabbox-provider-identity.json \
+  --policy /tmp/crabbox-macos-image-policy.json \
+  --profile <aws-profile>
 ```
 
-Apply the combined policy to the coordinator AWS principal before rerunning the
-preflight. If `admin providers identity --provider aws --json` returns an IAM
-role ARN, attach it to that role. If it returns an IAM user ARN, attach it to
-that user:
+The apply helper dry-runs first and refuses to write when the local AWS profile
+account does not match the coordinator account. If the dry-run is pointed at the
+right account and target, attach the combined policy to the coordinator AWS
+principal before rerunning the preflight:
 
 ```bash
-aws iam put-role-policy \
-  --role-name <coordinator-role-name> \
-  --policy-name CrabboxMacOSImageLifecycle \
-  --policy-document file:///tmp/crabbox-macos-image-policy.json
-
-aws iam put-user-policy \
-  --user-name <coordinator-user-name> \
-  --policy-name CrabboxMacOSImageLifecycle \
-  --policy-document file:///tmp/crabbox-macos-image-policy.json
+scripts/apply-macos-image-iam-policy.sh \
+  --identity /tmp/crabbox-provider-identity.json \
+  --policy /tmp/crabbox-macos-image-policy.json \
+  --profile <aws-profile> \
+  --apply
 ```
 
 For assumed-role identities, attach the policy to the underlying role name from

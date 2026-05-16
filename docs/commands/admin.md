@@ -162,29 +162,27 @@ For coordinator remediation, save the combined policy and attach it to the AWS
 principal returned by `admin providers identity --provider aws`:
 
 ```bash
-crabbox admin providers identity --provider aws --region eu-west-1 --json
+crabbox admin providers identity --provider aws --region eu-west-1 --json > /tmp/crabbox-provider-identity.json
 crabbox admin providers policy --provider aws --target macos > /tmp/crabbox-macos-image-policy.json
 
-coordinator_account=$(crabbox admin providers identity --provider aws --region eu-west-1 --json | jq -r .account)
-local_account=$(aws sts get-caller-identity --query Account --output text)
-test "$local_account" = "$coordinator_account"
+scripts/apply-macos-image-iam-policy.sh \
+  --identity /tmp/crabbox-provider-identity.json \
+  --policy /tmp/crabbox-macos-image-policy.json \
+  --profile <aws-profile>
 
-aws iam put-role-policy \
-  --role-name <coordinator-role-name> \
-  --policy-name CrabboxMacOSImageLifecycle \
-  --policy-document file:///tmp/crabbox-macos-image-policy.json
-
-aws iam put-user-policy \
-  --user-name <coordinator-user-name> \
-  --policy-name CrabboxMacOSImageLifecycle \
-  --policy-document file:///tmp/crabbox-macos-image-policy.json
+scripts/apply-macos-image-iam-policy.sh \
+  --identity /tmp/crabbox-provider-identity.json \
+  --policy /tmp/crabbox-macos-image-policy.json \
+  --profile <aws-profile> \
+  --apply
 ```
 
-Use the role command for IAM role ARNs and the user command for IAM user ARNs.
-For assumed-role identities, attach the policy to the underlying role name, not
-the session name. JSON output includes `policyTarget.type` and
-`policyTarget.name` when the coordinator ARN is an IAM user, IAM role, or STS
-assumed-role ARN.
+The helper dry-runs by default, verifies that the local AWS profile account
+matches the coordinator account, and then writes the inline role or user policy
+only when `--apply` is present. For assumed-role identities, it attaches the
+policy to the underlying role name, not the session name. JSON output includes
+`policyTarget.type` and `policyTarget.name` when the coordinator ARN is an IAM
+user, IAM role, or STS assumed-role ARN.
 
 Flags:
 
