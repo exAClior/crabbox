@@ -19,6 +19,7 @@ idle_timeout="${CRABBOX_MACOS_IDLE_TIMEOUT:-30m}"
 image_wait_timeout="${CRABBOX_MACOS_IMAGE_WAIT_TIMEOUT:-60m}"
 host_wait_timeout="${CRABBOX_MACOS_HOST_WAIT_TIMEOUT:-5h}"
 host_wait_interval="${CRABBOX_MACOS_HOST_WAIT_INTERVAL:-2m}"
+host_available_stable_count="${CRABBOX_MACOS_HOST_AVAILABLE_STABLE_COUNT:-2}"
 webvnc_wait_timeout="${CRABBOX_MACOS_WEBVNC_WAIT_TIMEOUT:-2m}"
 webvnc_wait_interval="${CRABBOX_MACOS_WEBVNC_WAIT_INTERVAL:-5s}"
 webvnc_start_grace="${CRABBOX_MACOS_WEBVNC_START_GRACE:-3s}"
@@ -100,6 +101,15 @@ run_tee() {
   printf ' %q' "$@"
   printf '\n'
   "$@" | tee "$out"
+}
+
+run_tee_combined() {
+  local out="$1"
+  shift
+  printf '+'
+  printf ' %q' "$@"
+  printf '\n'
+  "$@" > >(tee "$out") 2> >(tee -a "$out" >&2)
 }
 
 preflight_blocker_from_stderr() {
@@ -669,18 +679,28 @@ wait_for_host_available() {
   local host="$1"
   local label="$2"
   [[ -n "$host" ]] || return 0
-  local timeout_seconds interval_seconds deadline state log
+  local available_count available_needed timeout_seconds interval_seconds deadline state log
   log="$(log_for_label host-wait "$label")"
   : >"$log"
   timeout_seconds="$(duration_seconds "$host_wait_timeout")"
   interval_seconds="$(duration_seconds "$host_wait_interval")"
+  available_needed="$host_available_stable_count"
+  if ! [[ "$available_needed" =~ ^[0-9]+$ ]] || [[ "$available_needed" -lt 1 ]]; then
+    available_needed=1
+  fi
+  available_count=0
   deadline="$(($(date +%s) + timeout_seconds))"
-  log_line "$log" "waiting for EC2 Mac Dedicated Host $host to become available after $label lease stop; timeout=$host_wait_timeout interval=$host_wait_interval"
+  log_line "$log" "waiting for EC2 Mac Dedicated Host $host to become stably available after $label lease stop; timeout=$host_wait_timeout interval=$host_wait_interval stable_count=$available_needed"
   while true; do
     state="$(mac_host_state "$host")"
     if [[ "$state" == "available" ]]; then
-      log_line "$log" "host $host is available"
-      return 0
+      available_count="$((available_count + 1))"
+      log_line "$log" "host $host is available ($available_count/$available_needed)"
+      if [[ "$available_count" -ge "$available_needed" ]]; then
+        return 0
+      fi
+    else
+      available_count=0
     fi
     if [[ "$(date +%s)" -ge "$deadline" ]]; then
       log_line "$log" "timed out waiting for EC2 Mac Dedicated Host $host to become available; last state=${state:-missing}" >&2
@@ -807,9 +827,30 @@ create_checkpoint_from_source() {
 smoke_checkpoint_fork() {
   [[ "$checkpoint" == "1" ]] || return 0
   [[ -n "$checkpoint_id" ]] || return 0
+  local attempt max_attempts status
+  max_attempts="${CRABBOX_MACOS_CHECKPOINT_FORK_ATTEMPTS:-2}"
+  if ! [[ "$max_attempts" =~ ^[0-9]+$ ]] || [[ "$max_attempts" -lt 1 ]]; then
+    max_attempts=1
+  fi
   summary_phase="checkpoint-fork"
   checkpoint_fork_log="$evidence_dir/checkpoint-fork.log"
-  run_tee "$checkpoint_fork_log" "$CRABBOX_BIN" checkpoint fork "$checkpoint_id"
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    if [[ "$attempt" -gt 1 ]]; then
+      printf 'retrying checkpoint fork attempt %s/%s after host wait\n' "$attempt" "$max_attempts"
+      wait_for_host_available "$allocated_host" checkpoint
+    fi
+    set +e
+    run_tee_combined "$checkpoint_fork_log" "$CRABBOX_BIN" checkpoint fork "$checkpoint_id"
+    status=$?
+    set -e
+    if [[ "$status" -eq 0 ]]; then
+      break
+    fi
+    if [[ "$attempt" -eq "$max_attempts" ]]; then
+      blocker_message="checkpoint fork failed after $max_attempts attempt(s)"
+      return "$status"
+    fi
+  done
   checkpoint_fork_lease="$(checkpoint_fork_lease_from_log "$checkpoint_fork_log")"
   checkpoint_fork_lease_id="$checkpoint_fork_lease"
   if [[ -z "$checkpoint_fork_lease" ]]; then

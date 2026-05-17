@@ -164,6 +164,11 @@ case "$1" in
     if [[ "$2" == "create" ]]; then
       printf 'checkpoint created id=chk_macos kind=aws-ami resource=ami-checkpoint state=available region=%s workdir=/Users/ec2-user/crabbox/crabbox\\n' "$region"
     elif [[ "$2" == "fork" ]]; then
+      if [[ "\${CRABBOX_FAKE_CHECKPOINT_FORK_FAIL_ONCE:-0}" == "1" && ! -f "$state_dir/checkpoint-fork-failed" ]]; then
+        : >"$state_dir/checkpoint-fork-failed"
+        printf 'coordinator POST /v1/leases: http 500: transient host recycle\\n' >&2
+        exit 42
+      fi
       printf 'checkpoint forked id=%s lease=cbx_checkpoint slug=checkpoint image=ami-checkpoint workdir=/Users/ec2-user/crabbox/crabbox\\n' "$3"
     elif [[ "$2" == "delete" ]]; then
       printf 'checkpoint deleted id=%s kind=aws-ami\\n' "$3"
@@ -183,7 +188,7 @@ function runLifecycle(env) {
   return new Promise((resolve, reject) => {
     const child = spawn("bash", [lifecycleScript], {
       cwd: repoRoot,
-      env: { ...process.env, ...env },
+      env: { ...process.env, CRABBOX_MACOS_HOST_WAIT_INTERVAL: "0s", ...env },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -616,6 +621,34 @@ test("macOS lifecycle smoke preserves full mock lifecycle evidence", async () =>
   assert.match(fakeLog, /^checkpoint delete chk_macos$/m);
   assert.match(fakeLog, /^admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2\.metal --json$/m);
   assert.match(fakeLog, /^admin hosts release h-mock --provider aws --target macos --region eu-west-1 --force$/m);
+});
+
+test("macOS lifecycle smoke retries checkpoint fork after transient host recycle", async () => {
+  const run = await setupRun();
+  const result = await runLifecycle({
+    CRABBOX_BIN: run.fake,
+    CRABBOX_FAKE_LOG: run.fakeLog,
+    CRABBOX_FAKE_STATE: run.fakeState,
+    CRABBOX_FAKE_NO_HOST: "1",
+    CRABBOX_FAKE_CHECKPOINT_FORK_FAIL_ONCE: "1",
+    CRABBOX_MACOS_ALLOCATE: "1",
+    CRABBOX_MACOS_ARTIFACT_DIR: run.artifacts,
+    CRABBOX_MACOS_IMAGE_NAME: "checkpoint-fork-retry",
+    CRABBOX_MACOS_WEBVNC_START_GRACE: "0s",
+  });
+
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /retrying checkpoint fork attempt 2\/2/);
+
+  const summary = await readJSON(path.join(run.artifacts, "summary.json"));
+  assert.equal(summary.result, "passed");
+  assert.equal(summary.phase, "candidate");
+  assert.equal(summary.leases.checkpointFork, "cbx_checkpoint");
+  await assertSummaryFileContains(run.artifacts, summary.evidence.hostWait.checkpointFork, /stable_count=2/);
+  await assertSummaryFileContains(run.artifacts, summary.evidence.checkpointFork, /cbx_checkpoint/);
+
+  const fakeLog = await readFile(run.fakeLog, "utf8");
+  assert.equal((fakeLog.match(/^checkpoint fork chk_macos$/gm) ?? []).length, 2);
 });
 
 test("macOS lifecycle smoke forwards the selected region into warmup", async () => {
