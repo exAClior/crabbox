@@ -17,6 +17,7 @@
 - Fixed direct AWS macOS AMI checkpoint forks so resolved and recorded EC2 Mac Dedicated Host pins are reused after coordinator routing is disabled.
 - Fixed AWS macOS native checkpoint selection so brokered and direct macOS checkpoints use AMI-backed snapshots by default instead of raw EBS snapshot forks that EC2 Mac cannot reliably relaunch.
 - Fixed macOS image lifecycle smoke checkpoint forks so EC2 Mac host recycle waits require stable availability and retry once after transient host recycle failures.
+- Fixed macOS image lifecycle smoke checkpoint forks so forked macOS leases request desktop/WebVNC metadata before collecting WebVNC evidence.
 - Fixed macOS image lifecycle smoke summaries so paid EC2 Mac Dedicated Host allocation failures preserve stderr, blocker text, and remediation guidance instead of writing an empty blocker.
 - Fixed EC2 Mac Dedicated Host state parsing so live AWS `DescribeHosts` responses are recognized as reusable by macOS lifecycle smoke instead of falling through to a new host allocation path.
 - Fixed existing AWS macOS lease commands so `crabbox run --id ... --target macos` defaults the irrelevant capacity market to On-Demand instead of failing Spot validation before reaching the lease.

@@ -840,7 +840,7 @@ smoke_checkpoint_fork() {
       wait_for_host_available "$allocated_host" checkpoint
     fi
     set +e
-    run_tee_combined "$checkpoint_fork_log" "$CRABBOX_BIN" checkpoint fork "$checkpoint_id"
+    run_tee_combined "$checkpoint_fork_log" "$CRABBOX_BIN" checkpoint fork "$checkpoint_id" --desktop
     status=$?
     set -e
     if [[ "$status" -eq 0 ]]; then

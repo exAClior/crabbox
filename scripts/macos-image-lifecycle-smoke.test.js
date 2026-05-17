@@ -617,7 +617,7 @@ test("macOS lifecycle smoke preserves full mock lifecycle evidence", async () =>
   assert.equal((fakeLog.match(/^webvnc daemon start\b/gm) ?? []).length, 4);
   assert.equal((fakeLog.match(/^webvnc status\b/gm) ?? []).length, 4);
   assert.match(fakeLog, /^checkpoint create --id cbx_source --name full-checkpoint --mode native --strategy image --wait --wait-timeout 60m$/m);
-  assert.match(fakeLog, /^checkpoint fork chk_macos$/m);
+  assert.match(fakeLog, /^checkpoint fork chk_macos --desktop$/m);
   assert.match(fakeLog, /^checkpoint delete chk_macos$/m);
   assert.match(fakeLog, /^admin hosts quota --provider aws --target macos --region eu-west-1 --type mac2\.metal --json$/m);
   assert.match(fakeLog, /^admin hosts release h-mock --provider aws --target macos --region eu-west-1 --force$/m);
@@ -648,7 +648,7 @@ test("macOS lifecycle smoke retries checkpoint fork after transient host recycle
   await assertSummaryFileContains(run.artifacts, summary.evidence.checkpointFork, /cbx_checkpoint/);
 
   const fakeLog = await readFile(run.fakeLog, "utf8");
-  assert.equal((fakeLog.match(/^checkpoint fork chk_macos$/gm) ?? []).length, 2);
+  assert.equal((fakeLog.match(/^checkpoint fork chk_macos --desktop$/gm) ?? []).length, 2);
 });
 
 test("macOS lifecycle smoke forwards the selected region into warmup", async () => {
