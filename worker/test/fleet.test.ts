@@ -2718,7 +2718,7 @@ describe("fleet lease identity and idle", () => {
           <hostSet>
             <item>
               <hostId>h-000000000001</hostId>
-              <hostState>available</hostState>
+              <state>available</state>
               <availabilityZone>eu-west-1a</availabilityZone>
               <autoPlacement>off</autoPlacement>
               <allocationTime>2026-05-15T00:00:00Z</allocationTime>

@@ -1156,7 +1156,7 @@ export class EC2SpotClient {
     const properties = record(host["hostProperties"]);
     const macHost: AWSMacHost = {
       id: asString(host["hostId"]),
-      state: asString(host["hostState"]),
+      state: asString(host["hostState"] ?? host["state"]),
       region: this.region,
       availabilityZone: asString(host["availabilityZone"]),
       instanceType: asString(properties["instanceType"] ?? host["instanceType"]),
@@ -1426,7 +1426,9 @@ export function awsMacHostIDFromDescribeHosts(
       const hostID = asString(host["hostId"]);
       return hostID && hostID !== excludedHostID;
     });
-  const available = hosts.find((host) => asString(host["hostState"]) === "available");
+  const available = hosts.find(
+    (host) => asString(host["hostState"] ?? host["state"]) === "available",
+  );
   return asString((available ?? hosts[0] ?? {})["hostId"]);
 }
 

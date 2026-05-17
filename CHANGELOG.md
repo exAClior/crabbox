@@ -14,6 +14,7 @@
 ### Fixed
 
 - Fixed direct AWS AMI checkpoint create, inspect, delete, and fork paths so source instances are validated before host preparation and recorded account/direct-backend metadata is honored even after coordinator configuration changes.
+- Fixed EC2 Mac Dedicated Host state parsing so live AWS `DescribeHosts` responses are recognized as reusable by macOS lifecycle smoke instead of falling through to a new host allocation path.
 - Fixed recursive run artifact globs so `**` works on older Bash without crossing unintended path segments.
 
 ## 0.15.0 - 2026-05-17

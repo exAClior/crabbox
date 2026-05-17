@@ -196,6 +196,16 @@ describe("aws provider", () => {
         "h-stale",
       ),
     ).toBe("h-usable");
+    expect(
+      awsMacHostIDFromDescribeHosts({
+        hostSet: {
+          item: [
+            { hostId: "h-stale", state: "released" },
+            { hostId: "h-live", state: "available" },
+          ],
+        },
+      }),
+    ).toBe("h-live");
   });
 
   it("parses EC2 host id sets from AllocateHosts responses", () => {
