@@ -972,6 +972,9 @@ func checkpointCreateMode(mode, strategy string, cfg Config, server Server, targ
 		if kind, ok := nativeCheckpointKind(cfg, server, target, checkpointStrategyDiskSnapshot); ok {
 			return kind
 		}
+		if kind, ok := directAWSNativeCheckpointKind(cfg, server, target, checkpointStrategyDiskSnapshot); ok {
+			return kind
+		}
 		return "unsupported"
 	case "archive", "workspace", "workspace-archive":
 		return checkpointKindArchive
@@ -1028,6 +1031,9 @@ func directAWSNativeCheckpointKind(cfg Config, server Server, target SSHTarget, 
 	targetOS := firstNonBlank(target.TargetOS, cfg.TargetOS)
 	if targetOS != targetLinux && targetOS != targetMacOS {
 		return "", false
+	}
+	if targetOS == targetMacOS {
+		return checkpointKindAWSAMI, true
 	}
 	if normalizeCheckpointStrategy(strategy) != checkpointStrategyImage {
 		return "", false

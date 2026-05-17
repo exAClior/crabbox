@@ -400,8 +400,8 @@ func TestCheckpointCreateModeNativeSupportsDirectAWSAMI(t *testing.T) {
 	if got := checkpointCreateMode("image", "", cfg, server, target, false); got != checkpointKindAWSAMI {
 		t.Fatalf("image mode=%q, want %q", got, checkpointKindAWSAMI)
 	}
-	if got := checkpointCreateMode("snapshot", "", cfg, server, target, false); got != "unsupported" {
-		t.Fatalf("snapshot mode=%q, want unsupported", got)
+	if got := checkpointCreateMode("snapshot", "", cfg, server, target, false); got != checkpointKindAWSAMI {
+		t.Fatalf("snapshot mode=%q, want %q", got, checkpointKindAWSAMI)
 	}
 }
 
@@ -555,6 +555,21 @@ func TestCheckpointCreateModeNativeUsesResolvedProvider(t *testing.T) {
 	server := Server{Provider: "hetzner", CloudID: "123"}
 	if got := checkpointCreateMode("native", "", cfg, server, SSHTarget{TargetOS: targetLinux}, false); got != "unsupported" {
 		t.Fatalf("mode=%q, want unsupported", got)
+	}
+}
+
+func TestCheckpointCreateModeDirectAWSMacOSDiskSnapshotUsesAMI(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Provider = "aws"
+	cfg.Coordinator = ""
+	cfg.TargetOS = targetMacOS
+	server := Server{Provider: "aws", CloudID: "i-1234567890abcdef0"}
+	target := SSHTarget{TargetOS: targetMacOS}
+
+	for _, mode := range []string{"native", "snapshot"} {
+		if got := checkpointCreateMode(mode, checkpointStrategyDiskSnapshot, cfg, server, target, false); got != checkpointKindAWSAMI {
+			t.Fatalf("mode=%s got %q, want %q", mode, got, checkpointKindAWSAMI)
+		}
 	}
 }
 
