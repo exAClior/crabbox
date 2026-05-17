@@ -1269,6 +1269,10 @@ func applyNativeCheckpointForkConfig(cfg *Config, fs *flag.FlagSet, record check
 		cfg.WindowsMode = record.WindowsMode
 	}
 	if cfg.Provider == "aws" && cfg.TargetOS == targetMacOS {
+		if record.Native.Direct && record.HostID != "" {
+			cfg.HostID = record.HostID
+			cfg.AWSMacHostID = record.HostID
+		}
 		if !flagWasSet(fs, "market") {
 			cfg.Capacity.Market = "on-demand"
 		}

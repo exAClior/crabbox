@@ -986,6 +986,41 @@ func TestApplyAWSAMICheckpointForkConfigKeepsDirectRecordsOffCoordinator(t *test
 	}
 }
 
+func TestApplyAWSAMICheckpointForkConfigPreservesDirectMacHostPin(t *testing.T) {
+	fs := newFlagSet("checkpoint fork", io.Discard)
+	_ = fs.String("type", "", "provider type")
+	_ = fs.String("market", "spot", "capacity market")
+	cfg := defaultConfig()
+	cfg.Provider = "aws"
+	cfg.Coordinator = "https://coordinator.example"
+	cfg.TargetOS = targetLinux
+	record := checkpointRecord{
+		Kind:        checkpointKindAWSAMI,
+		TargetOS:    targetMacOS,
+		WindowsMode: windowsModeNormal,
+		ServerType:  "mac2.metal",
+		HostID:      "h-000000000001",
+	}
+	record.Native.Provider = "aws"
+	record.Native.ImageID = "ami-12345678"
+	record.Native.Region = "eu-west-1"
+	record.Native.Direct = true
+
+	if err := applyAWSAMICheckpointForkConfig(&cfg, fs, record); err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Coordinator != "" {
+		t.Fatalf("direct checkpoint fork kept coordinator: %q", cfg.Coordinator)
+	}
+	if cfg.HostID != "h-000000000001" || cfg.AWSMacHostID != "h-000000000001" {
+		t.Fatalf("host pin not preserved: hostID=%q awsMacHostID=%q", cfg.HostID, cfg.AWSMacHostID)
+	}
+	if cfg.Capacity.Market != "on-demand" {
+		t.Fatalf("market=%q, want on-demand", cfg.Capacity.Market)
+	}
+}
+
 func TestApplyAWSAMICheckpointForkConfigHonorsClassOverride(t *testing.T) {
 	fs := newFlagSet("checkpoint fork", io.Discard)
 	class := fs.String("class", "standard", "provider class")
