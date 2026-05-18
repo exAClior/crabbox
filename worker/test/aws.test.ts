@@ -355,6 +355,30 @@ describe("aws provider", () => {
         "eu-west-1",
       ),
     ).toBe("eu-west-1b");
+    expect(
+      awsRegionCandidates(
+        {
+          target: "macos",
+          hostID: "h-123",
+          awsRegion: "us-east-1",
+          capacityRegions: ["eu-west-1"],
+        },
+        { CRABBOX_AWS_REGION: "eu-west-1", CRABBOX_CAPACITY_REGIONS: "us-west-2" },
+        "us-east-1",
+      ),
+    ).toEqual(["us-east-1"]);
+    expect(
+      awsRegionCandidates(
+        {
+          target: "macos",
+          awsAMI: "ami-123",
+          awsRegion: "us-east-1",
+          capacityRegions: ["eu-west-1"],
+        },
+        { CRABBOX_AWS_REGION: "eu-west-1", CRABBOX_CAPACITY_REGIONS: "us-west-2" },
+        "us-east-1",
+      ),
+    ).toEqual(["us-east-1"]);
   });
 
   it("treats macOS host and image misses as retryable regional AWS failures", () => {

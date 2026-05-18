@@ -1674,10 +1674,17 @@ export function awsLaunchCandidates(
 }
 
 export function awsRegionCandidates(
-  config: Pick<LeaseConfig, "awsRegion" | "capacityRegions">,
+  config: Pick<LeaseConfig, "awsRegion" | "capacityRegions"> &
+    Partial<Pick<LeaseConfig, "target" | "hostID" | "awsMacHostID" | "awsAMI" | "awsSnapshot">>,
   env: Pick<Env, "CRABBOX_AWS_REGION" | "CRABBOX_CAPACITY_REGIONS">,
   preferredRegion = "eu-west-1",
 ): string[] {
+  if (
+    config.target === "macos" &&
+    (config.hostID || config.awsMacHostID || config.awsAMI || config.awsSnapshot)
+  ) {
+    return uniqueStrings([config.awsRegion || preferredRegion || env.CRABBOX_AWS_REGION || ""]);
+  }
   return uniqueStrings([
     preferredRegion,
     config.awsRegion,
