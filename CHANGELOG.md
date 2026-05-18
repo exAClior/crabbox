@@ -19,6 +19,7 @@
 - Fixed AWS macOS lease bootstrap so EC2 Mac instances explicitly install the Crabbox SSH key, enable Remote Login on configured ports, and treat Screen Sharing as available for WebVNC even when a dedicated host lease predates the `desktop=true` label.
 - Fixed AWS WebVNC reconnects so coordinator lease heartbeats refresh SSH ingress from the caller source before local bridge startup retries.
 - Fixed WebVNC daemon restarts so the background bridge keeps its lease claim after a repo checkout changes.
+- Fixed macOS WebVNC bridge churn by using a single bridge slot for macOS Screen Sharing instead of opening the default multi-slot VNC pool.
 - Fixed the portal so configured AWS macOS Dedicated Hosts appear as lease-like dedicated rows with host detail pages, attached-lease access actions, and local start/WebVNC commands for host-pinned desktop leases.
 - Fixed direct AWS AMI checkpoint create, inspect, delete, and fork paths so source instances are validated before host preparation and recorded account/direct-backend metadata is honored even after coordinator configuration changes.
 - Fixed direct AWS macOS AMI checkpoint forks so resolved and recorded EC2 Mac Dedicated Host pins are reused after coordinator routing is disabled.

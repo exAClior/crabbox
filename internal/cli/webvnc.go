@@ -147,7 +147,7 @@ func (a App) webvnc(ctx context.Context, args []string) error {
 		LeaseID:   leaseID,
 		Host:      connHost,
 		Port:      connPort,
-		PoolSize:  defaultWebVNCBridgePoolSize,
+		PoolSize:  webVNCBridgePoolSizeForTarget(target),
 		RescueCtx: rescueCtx,
 		NativeVNC: nativeVNCOpenCommand(cfg, target, leaseID),
 		Log:       a.Stdout,
@@ -173,6 +173,14 @@ func (a App) webvnc(ctx context.Context, args []string) error {
 }
 
 const defaultWebVNCBridgePoolSize = 4
+const macOSWebVNCBridgePoolSize = 1
+
+func webVNCBridgePoolSizeForTarget(target SSHTarget) int {
+	if target.TargetOS == targetMacOS {
+		return macOSWebVNCBridgePoolSize
+	}
+	return defaultWebVNCBridgePoolSize
+}
 
 type webVNCBridgePoolConfig struct {
 	Coord     *CoordinatorClient
