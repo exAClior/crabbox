@@ -1728,23 +1728,9 @@ describe("fleet lease identity and idle", () => {
         expiresAt: "2026-05-17T02:40:00.000Z",
       }),
     );
-    let startedConfig: LeaseConfig | undefined;
     const fleet = testFleet(
       storage,
-      {
-        aws: fakeProvider(
-          (config) => {
-            startedConfig = config;
-          },
-          {
-            provider: "aws",
-            serverType: "mac2.metal",
-            hostID: "h-000000000003",
-            cloudID: "i-000000000101",
-            region: "eu-west-1",
-          },
-        ),
-      },
+      {},
       {
         AWS_ACCESS_KEY_ID: "test",
         AWS_SECRET_ACCESS_KEY: "test",
@@ -1843,10 +1829,14 @@ describe("fleet lease identity and idle", () => {
     expect(startPage.status).toBe(200);
     const startBody = await startPage.text();
     expect(startBody).toContain("start desktop lease");
-    expect(startBody).toContain('name="sshPublicKey"');
+    expect(startBody).not.toContain('name="sshPublicKey"');
+    expect(startBody).toContain(
+      "CRABBOX_HOST_ID=h-000000000003 crabbox warmup --provider aws --target macos --market on-demand --type mac2.metal --desktop",
+    );
+    expect(startBody).toContain("crabbox webvnc --id &lt;lease-id-or-slug&gt; --open");
     expect(startBody).toContain("host-pinned macOS run");
 
-    const missingKey = await fleet.fetch(
+    const idlePost = await fleet.fetch(
       request("POST", "/portal/hosts/aws/h-000000000003/vnc", {
         headers: {
           "x-crabbox-owner": "peter@example.com",
@@ -1855,31 +1845,8 @@ describe("fleet lease identity and idle", () => {
         body: {},
       }),
     );
-    expect(missingKey.status).toBe(400);
-    await expect(missingKey.text()).resolves.toContain("SSH public key");
-
-    const started = await fleet.fetch(
-      request("POST", "/portal/hosts/aws/h-000000000003/vnc", {
-        headers: {
-          "x-crabbox-owner": "peter@example.com",
-          "x-crabbox-org": "openclaw",
-        },
-        body: { sshPublicKey: "ssh-ed25519 test portal@example.com" },
-      }),
-    );
-    expect(started.status).toBe(303);
-    expect(started.headers.get("location")).toMatch(/^\/portal\/leases\/cbx_[a-f0-9]{12}\/vnc$/);
-    expect(startedConfig).toMatchObject({
-      provider: "aws",
-      target: "macos",
-      desktop: true,
-      serverType: "mac2.metal",
-      serverTypeExplicit: true,
-      hostID: "h-000000000003",
-      awsRegion: "eu-west-1",
-      capacityMarket: "on-demand",
-      sshPublicKey: "ssh-ed25519 test portal@example.com",
-    });
+    expect(idlePost.status).toBe(409);
+    await expect(idlePost.text()).resolves.toContain("No active Crabbox lease");
   });
 
   it("syncs external runner visibility and marks missing runners stale", async () => {

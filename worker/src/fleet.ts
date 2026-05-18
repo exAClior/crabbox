@@ -1598,7 +1598,11 @@ export class FleetDurableObject implements DurableObject {
       );
     }
     if (!lease) {
-      return await this.portalStartMacHostDesktopLease(request, host);
+      return portalError(
+        "WebVNC unavailable",
+        "No active Crabbox lease is attached to that dedicated host. Start a host-pinned desktop lease from the CLI, then open WebVNC for the new lease.",
+        409,
+      );
     }
     if (!this.leaseManageableByRequest(lease, request, isAdminRequest(request))) {
       return portalError("WebVNC unavailable", "Lease manage access is required.", 403);
@@ -1613,67 +1617,6 @@ export class FleetDurableObject implements DurableObject {
       status: 303,
       headers: { location: `/portal/leases/${encodeURIComponent(lease.id)}/vnc` },
     });
-  }
-
-  private async portalStartMacHostDesktopLease(
-    request: Request,
-    host: PortalMacHostRecord,
-  ): Promise<Response> {
-    const input = await this.portalMacHostVNCInput(request);
-    const sshPublicKey = nonSecretString(input.sshPublicKey);
-    if (!sshPublicKey) {
-      return portalError(
-        "Start desktop lease failed",
-        "Paste an SSH public key before starting a host-pinned macOS desktop lease.",
-        400,
-      );
-    }
-    const leaseID = newLeaseID();
-    const headers = new Headers(request.headers);
-    headers.set("content-type", "application/json");
-    const create = await this.createLease(
-      new Request(request.url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          leaseID,
-          requestedSlug: `mac-${host.id.slice(-6)}`,
-          provider: host.provider,
-          target: host.target,
-          desktop: true,
-          class: "mac",
-          serverType: host.instanceType,
-          serverTypeExplicit: true,
-          hostId: host.id,
-          awsRegion: host.region,
-          capacity: { market: "on-demand" },
-          providerKey: `crabbox-${leaseID}`,
-          sshPublicKey,
-        }),
-      }),
-    );
-    const payload = (await create.json().catch(() => undefined)) as
-      | { lease?: LeaseRecord; message?: string; error?: string }
-      | undefined;
-    if (create.status !== 201 || !payload?.lease) {
-      return portalError(
-        "Start desktop lease failed",
-        payload?.message || payload?.error || `coordinator returned HTTP ${create.status}`,
-        create.status >= 400 && create.status < 600 ? create.status : 502,
-      );
-    }
-    return new Response(null, {
-      status: 303,
-      headers: { location: `/portal/leases/${encodeURIComponent(payload.lease.id)}/vnc` },
-    });
-  }
-
-  private async portalMacHostVNCInput(request: Request): Promise<{ sshPublicKey?: string }> {
-    if (request.headers.get("content-type")?.includes("application/json")) {
-      return await optionalJson<{ sshPublicKey?: string }>(request);
-    }
-    const form = await request.formData();
-    return { sshPublicKey: String(form.get("sshPublicKey") || "") };
   }
 
   private async resolvePortalLease(
